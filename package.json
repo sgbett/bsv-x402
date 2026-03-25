@@ -1,6 +1,6 @@
 {
   "name": "bsv-x402",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "x402 payment protocol client — a fetch() wrapper that handles 402 payment flows transparently",
   "type": "module",
   "main": "dist/index.cjs",
@@ -20,6 +20,10 @@
     "build": "tsup",
     "test": "vitest",
     "typecheck": "tsc --noEmit"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sgbett/bsv-x402.git"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
