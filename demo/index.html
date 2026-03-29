@@ -469,7 +469,21 @@ function initClient(tierName, nightmareConfirmation) {
     log('info', `Tier set: "${tierName}"`)
     updateTierInfo(tierName)
     updateWindowLimits(tierName)
-    updateCircuitBreaker(false)
+    // Check persisted state for boot UI
+    try {
+      const raw = localStorage.getItem('x402:limit-state')
+      if (raw) {
+        const persisted = JSON.parse(raw)
+        updateCircuitBreaker(persisted.circuitBroken ?? false)
+        if (persisted.circuitBroken) {
+          log('block', `Circuit breaker is OPEN from previous session (${persisted.entries?.length ?? 0} ledger entries)`)
+        }
+      } else {
+        updateCircuitBreaker(false)
+      }
+    } catch {
+      updateCircuitBreaker(false)
+    }
   } catch (e) {
     log('block', `Failed: ${e.message}`)
   }
