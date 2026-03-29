@@ -50,5 +50,7 @@ function describeAction(action: TwoFactorAction): string {
       return `Approve high-value payment of ${action.amount} sats to ${action.origin}?`
     case "new-site-approval":
       return `Allow automated payments to ${action.origin}?`
+    case "limit-override":
+      return `Spending limit reached: ${action.reason}\nAllow this payment of ${action.amount} sats to ${action.origin}?`
   }
 }

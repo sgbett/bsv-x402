@@ -400,6 +400,11 @@ function createMockTwoFactorProvider() {
             title = 'Approve New Site'
             detail = `Allow payments to ${action.origin}?`
             break
+          case 'limit-override':
+            icon = '\u{26A0}\uFE0F'
+            title = 'Spending Limit Reached'
+            detail = `${action.reason}\n\nAllow this one payment of ${fmtSats(action.amount)} to ${action.origin}?`
+            break
           default:
             icon = '\u{1F511}'
             title = 'Wallet Verification'

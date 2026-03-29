@@ -263,11 +263,11 @@ export class RateLimiter {
       const totalTx = windowEntries.length
 
       if (totalSats + challenge.amount > wl.maxSatoshis) {
-        return { action: "block", reason: `Exceeds ${wl.window} sats limit (${wl.maxSatoshis})`, severity: "reject" }
+        return { action: "block", reason: `Exceeds ${wl.window} sats limit (${wl.maxSatoshis})`, severity: "window" }
       }
 
       if (totalTx + 1 > wl.maxTransactions) {
-        return { action: "block", reason: `Exceeds ${wl.window} tx count limit (${wl.maxTransactions})`, severity: "reject" }
+        return { action: "block", reason: `Exceeds ${wl.window} tx count limit (${wl.maxTransactions})`, severity: "window" }
       }
 
       // Yellow light check

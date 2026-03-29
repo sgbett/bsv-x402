@@ -101,7 +101,7 @@ export interface LimitState {
   hmac: string
 }
 
-export type BlockSeverity = "reject" | "trip"
+export type BlockSeverity = "reject" | "window" | "trip"
 
 export type LimitCheckResult =
   | { action: "allow" }
@@ -124,6 +124,7 @@ export type TwoFactorAction =
   | { type: "tier-change"; from: TierName; to: TierName }
   | { type: "high-value-tx"; amount: number; origin: string }
   | { type: "new-site-approval"; origin: string }
+  | { type: "limit-override"; amount: number; origin: string; reason: string }
 
 export interface TwoFactorProvider {
   verify(action: TwoFactorAction): Promise<boolean>

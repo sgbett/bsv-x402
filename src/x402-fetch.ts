@@ -114,9 +114,28 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         if (result.severity === "trip") {
           rl.trip()
           await persist(rl)
+          config.onLimitReached?.(result.reason)
+          return response
         }
-        config.onLimitReached?.(result.reason)
-        return response
+
+        // Window blocks can be overridden with 2FA (one-shot exception)
+        if (result.severity === "window" && twoFactor) {
+          config.onLimitReached?.(result.reason)
+          const override = await twoFactor.verify({
+            type: "limit-override",
+            amount: challenge.amount,
+            origin,
+            reason: result.reason,
+          })
+          if (override) {
+            // User approved — proceed with this one payment
+          } else {
+            return response
+          }
+        } else {
+          config.onLimitReached?.(result.reason)
+          return response
+        }
       }
 
       if (result.action === "yellow-light") {
