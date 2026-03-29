@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Request</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      width: 400px;
+      min-height: 500px;
+      overflow-y: auto;
+    }
+
+    .container {
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      text-align: center;
+      color: #00d4aa;
+    }
+
+    .origin {
+      text-align: center;
+      font-size: 13px;
+      color: #888;
+      word-break: break-all;
+    }
+
+    .origin strong {
+      color: #b0b0b0;
+    }
+
+    .amount-section {
+      text-align: center;
+      padding: 20px 0;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+    }
+
+    .amount {
+      font-size: 42px;
+      font-weight: 700;
+      color: #ffffff;
+      line-height: 1.1;
+    }
+
+    .amount-unit {
+      font-size: 16px;
+      font-weight: 400;
+      color: #00d4aa;
+      margin-left: 4px;
+    }
+
+    .usd-estimate {
+      font-size: 13px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .description {
+      font-size: 14px;
+      color: #b0b0b0;
+      text-align: center;
+      padding: 0 8px;
+      line-height: 1.4;
+    }
+
+    .spend-status {
+      font-size: 13px;
+      color: #888;
+      text-align: center;
+      padding: 10px 12px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 8px;
+    }
+
+    .spend-status strong {
+      color: #e0e0e0;
+    }
+
+    .warning {
+      display: none;
+      text-align: center;
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+
+    .warning.yellow {
+      display: block;
+      background: rgba(241, 196, 15, 0.15);
+      color: #f1c40f;
+      border: 1px solid rgba(241, 196, 15, 0.3);
+    }
+
+    .warning.red {
+      display: block;
+      background: rgba(231, 76, 60, 0.15);
+      color: #e74c3c;
+      border: 1px solid rgba(231, 76, 60, 0.3);
+    }
+
+    .countdown {
+      text-align: center;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .buttons {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+    }
+
+    .buttons button {
+      flex: 1;
+      padding: 14px 0;
+      border: none;
+      border-radius: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .buttons button:hover {
+      opacity: 0.85;
+    }
+
+    .buttons button:active {
+      opacity: 0.7;
+    }
+
+    #approve-btn {
+      background: #00d4aa;
+      color: #1a1a2e;
+    }
+
+    #deny-btn {
+      background: #e74c3c;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Payment Request</h1>
+
+    <div class="origin">
+      <strong id="origin-display">unknown origin</strong>
+    </div>
+
+    <div class="amount-section">
+      <div class="amount">
+        <span id="amount-value">--</span><span class="amount-unit">sats</span>
+      </div>
+      <div class="usd-estimate" id="usd-estimate">&asymp; $--.-- USD</div>
+    </div>
+
+    <div class="description" id="description">Loading payment details...</div>
+
+    <div class="spend-status" id="spend-status">
+      Spent <strong id="spent-amount">--</strong> of <strong id="spend-limit">--</strong> sats this <span id="spend-window">session</span>
+    </div>
+
+    <div class="warning" id="warning"></div>
+
+    <div class="countdown" id="countdown">Auto-deny in 60s</div>
+
+    <div class="buttons">
+      <button id="deny-btn">Deny</button>
+      <button id="approve-btn">Approve</button>
+    </div>
+  </div>
+
+  <script src="approve.js"></script>
+</body>
+</html>

@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Set Up Your bsv-x402 Wallet</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      line-height: 1.6;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 2rem 1rem;
+    }
+
+    .setup-container {
+      width: 100%;
+      max-width: 500px;
+    }
+
+    h1 {
+      text-align: center;
+      color: #00d4aa;
+      font-size: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    .section {
+      margin-bottom: 1.5rem;
+    }
+
+    .section-label {
+      display: block;
+      font-size: 0.85rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+
+    /* Radio options */
+    .radio-group {
+      display: flex;
+      gap: 1rem;
+    }
+
+    .radio-option {
+      flex: 1;
+      position: relative;
+    }
+
+    .radio-option input[type="radio"] {
+      position: absolute;
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .radio-option label {
+      display: block;
+      padding: 0.75rem 1rem;
+      border: 2px solid #2a2a4a;
+      border-radius: 8px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 0.9rem;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .radio-option label:hover {
+      border-color: #00d4aa;
+    }
+
+    .radio-option input[type="radio"]:checked + label {
+      border-color: #00d4aa;
+      background: rgba(0, 212, 170, 0.1);
+    }
+
+    /* Seed area */
+    .seed-area {
+      display: none;
+      margin-bottom: 1.5rem;
+    }
+
+    .seed-area.visible {
+      display: block;
+    }
+
+    .seed-display {
+      position: relative;
+      background: #0d0d1a;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 1rem;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      word-spacing: 0.3em;
+      min-height: 80px;
+    }
+
+    .seed-display .seed-text {
+      padding-right: 2.5rem;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      background: #2a2a4a;
+      border: none;
+      color: #e0e0e0;
+      padding: 0.3rem 0.6rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.75rem;
+    }
+
+    .copy-btn:hover {
+      background: #00d4aa;
+      color: #1a1a2e;
+    }
+
+    .seed-textarea {
+      width: 100%;
+      background: #0d0d1a;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 1rem;
+      color: #e0e0e0;
+      font-family: 'Courier New', monospace;
+      font-size: 0.9rem;
+      line-height: 1.8;
+      resize: vertical;
+      min-height: 80px;
+    }
+
+    .seed-textarea:focus {
+      outline: none;
+      border-color: #00d4aa;
+    }
+
+    /* Warning */
+    .warning {
+      background: rgba(255, 180, 0, 0.1);
+      border: 1px solid #ffb400;
+      border-radius: 8px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1.5rem;
+      font-size: 0.85rem;
+      color: #ffb400;
+      display: none;
+    }
+
+    .warning.visible {
+      display: block;
+    }
+
+    /* Inputs */
+    .input-group {
+      margin-bottom: 1rem;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 0.85rem;
+      color: #aaa;
+      margin-bottom: 0.3rem;
+    }
+
+    .input-group input,
+    .input-group select {
+      width: 100%;
+      background: #0d0d1a;
+      border: 1px solid #2a2a4a;
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      color: #e0e0e0;
+      font-size: 0.9rem;
+    }
+
+    .input-group input:focus,
+    .input-group select:focus {
+      outline: none;
+      border-color: #00d4aa;
+    }
+
+    .input-group select {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 0.75rem center;
+      padding-right: 2rem;
+    }
+
+    .input-group select option {
+      background: #1a1a2e;
+      color: #e0e0e0;
+    }
+
+    /* Error message */
+    .error-message {
+      color: #ff5555;
+      font-size: 0.8rem;
+      margin-top: 0.25rem;
+      display: none;
+    }
+
+    .error-message.visible {
+      display: block;
+    }
+
+    /* Buttons */
+    .complete-btn {
+      width: 100%;
+      padding: 0.8rem;
+      background: #00d4aa;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 0.5rem;
+      transition: background 0.2s;
+    }
+
+    .complete-btn:hover {
+      background: #00b894;
+    }
+
+    .complete-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* Success overlay */
+    .success-overlay {
+      display: none;
+      text-align: center;
+      padding: 3rem 1rem;
+    }
+
+    .success-overlay.visible {
+      display: block;
+    }
+
+    .success-overlay h2 {
+      color: #00d4aa;
+      margin-bottom: 1rem;
+    }
+
+    .success-overlay p {
+      color: #aaa;
+      font-size: 0.95rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="setup-container">
+    <!-- Setup form -->
+    <div id="setup-form">
+      <h1>Set Up Your bsv-x402 Wallet</h1>
+
+      <!-- Wallet mode selection -->
+      <div class="section">
+        <span class="section-label">Wallet Mode</span>
+        <div class="radio-group">
+          <div class="radio-option">
+            <input type="radio" id="mode-create" name="wallet-mode" value="create" checked>
+            <label for="mode-create">Create New Wallet</label>
+          </div>
+          <div class="radio-option">
+            <input type="radio" id="mode-import" name="wallet-mode" value="import">
+            <label for="mode-import">Import Existing Wallet</label>
+          </div>
+        </div>
+      </div>
+
+      <!-- Seed display (for create mode) -->
+      <div id="seed-create-area" class="seed-area visible">
+        <span class="section-label">Your Seed Phrase</span>
+        <div class="seed-display">
+          <span id="seed-text" class="seed-text">Generating...</span>
+          <button id="copy-seed-btn" class="copy-btn" title="Copy seed phrase">Copy</button>
+        </div>
+      </div>
+
+      <!-- Seed import (for import mode) -->
+      <div id="seed-import-area" class="seed-area">
+        <span class="section-label">Paste Your Seed / Mnemonic</span>
+        <textarea id="seed-input" class="seed-textarea" placeholder="Enter your seed phrase or mnemonic..." rows="3"></textarea>
+      </div>
+
+      <!-- Warning -->
+      <div id="seed-warning" class="warning visible">
+        Warning: Write down your seed phrase! It cannot be recovered.
+      </div>
+
+      <!-- Password -->
+      <div class="section">
+        <span class="section-label">Encryption Password</span>
+        <div class="input-group">
+          <label for="password">Password (minimum 8 characters)</label>
+          <input type="password" id="password" placeholder="Enter password" autocomplete="new-password">
+        </div>
+        <div class="input-group">
+          <label for="password-confirm">Confirm Password</label>
+          <input type="password" id="password-confirm" placeholder="Confirm password" autocomplete="new-password">
+          <div id="password-error" class="error-message"></div>
+        </div>
+      </div>
+
+      <!-- Tier selection -->
+      <div class="section">
+        <span class="section-label">Spending Tier</span>
+        <div class="input-group">
+          <label for="tier-select">Auto-approve transactions up to the tier limit</label>
+          <select id="tier-select">
+            <option value="I'm Too Young to Die">I'm Too Young to Die</option>
+            <option value="Hey, Not Too Rough" selected>Hey, Not Too Rough</option>
+            <option value="Hurt Me Plenty">Hurt Me Plenty</option>
+            <option value="Ultra-Violence">Ultra-Violence</option>
+            <option value="Nightmare!">Nightmare!</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <button id="complete-btn" class="complete-btn">Complete Setup</button>
+    </div>
+
+    <!-- Success message (shown after setup) -->
+    <div id="success-overlay" class="success-overlay">
+      <h2>Wallet Ready</h2>
+      <p>Your bsv-x402 wallet has been set up successfully. You can close this tab.</p>
+    </div>
+  </div>
+
+  <script src="setup.js"></script>
+</body>
+</html>

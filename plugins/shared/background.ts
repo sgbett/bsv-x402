@@ -2,6 +2,9 @@
 
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import { handleCWIRequest, type CWIHandlerContext } from './cwi'
+import { ExtensionStorageAdapter } from './storage-bridge'
+import { RateLimiter, resolveSpendLimits } from '../../src/limits'
+import type { Challenge, LimitCheckResult, SpendMode, TierName } from '../../src/types'
 
 // ---------------------------------------------------------------------------
 // Session state (placeholder — real SessionManager from key-manager.ts will
@@ -10,6 +13,8 @@ import { handleCWIRequest, type CWIHandlerContext } from './cwi'
 
 let sessionSeed: string | null = null
 let walletNetwork = 'main'
+let currentTier: TierName = 'Hey, Not Too Rough'
+let currentMode: SpendMode = 'interactive'
 
 const context: CWIHandlerContext = {
   getSeed: () => {
@@ -21,11 +26,57 @@ const context: CWIHandlerContext = {
 }
 
 // ---------------------------------------------------------------------------
+// Spend limits integration
+// ---------------------------------------------------------------------------
+
+const storage = new ExtensionStorageAdapter()
+let limiter: RateLimiter | null = null
+
+async function ensureLimiter(): Promise<RateLimiter> {
+  if (limiter) return limiter
+  const limits = resolveSpendLimits(currentTier, currentMode)
+  const state = await storage.load()
+  limiter = new RateLimiter(limits, state ?? undefined)
+  return limiter
+}
+
+async function persistLimiter(rl: RateLimiter): Promise<void> {
+  await storage.save(rl.getState())
+}
+
+/** Check spend limits before a payment. Returns null if allowed, error string if blocked. */
+export async function checkSpendLimits(challenge: Challenge, origin: string): Promise<{ allowed: boolean; reason?: string }> {
+  const rl = await ensureLimiter()
+  const result: LimitCheckResult = rl.check(challenge, origin)
+
+  if (result.action === 'allow') return { allowed: true }
+  if (result.action === 'yellow-light') {
+    // TODO: open approve.html popup for user confirmation
+    return { allowed: true } // permissive for now
+  }
+  if (result.action === 'block') {
+    if (result.severity === 'trip') {
+      rl.trip()
+      await persistLimiter(rl)
+    }
+    return { allowed: false, reason: result.reason }
+  }
+  return { allowed: true }
+}
+
+/** Record a completed payment in the rate limiter. */
+export async function recordPayment(origin: string, satoshis: number, txid: string): Promise<void> {
+  const rl = await ensureLimiter()
+  rl.record({ timestamp: Date.now(), origin, satoshis, txid })
+  await persistLimiter(rl)
+}
+
+// ---------------------------------------------------------------------------
 // Internal messages from popup / setup UI
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork'
+  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier'
   payload?: unknown
 }
 
@@ -56,7 +107,7 @@ function handleInternalMessage(message: InternalMessage): CWIResponse | Record<s
       return { id: '', status: 'ok', result: { unlocked: false } }
 
     case 'getState':
-      return { isUnlocked: context.isUnlocked(), network: walletNetwork }
+      return { isUnlocked: context.isUnlocked(), network: walletNetwork, tier: currentTier }
 
     case 'setNetwork': {
       const payload = message.payload as { network: string } | undefined
@@ -75,6 +126,16 @@ function handleInternalMessage(message: InternalMessage): CWIResponse | Record<s
       sessionSeed = 'new-wallet-seed'
       console.log('x402: wallet set up')
       return { id: '', status: 'ok', result: { unlocked: true } }
+    }
+
+    case 'setTier': {
+      const payload = message.payload as { tier: TierName } | undefined
+      if (payload?.tier) {
+        currentTier = payload.tier
+        limiter = null // reset limiter so it picks up new tier
+        console.log(`x402: tier changed to "${currentTier}"`)
+      }
+      return { id: '', status: 'ok', result: { tier: currentTier } }
     }
 
     default:
