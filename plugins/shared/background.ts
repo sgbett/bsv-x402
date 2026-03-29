@@ -111,7 +111,7 @@ function handleInternalMessage(message: InternalMessage): CWIResponse | Record<s
 
     case 'setNetwork': {
       const payload = message.payload as { network: string } | undefined
-      if (payload?.network) {
+      if (payload?.network === 'main' || payload?.network === 'test') {
         walletNetwork = payload.network
       }
       return { id: '', status: 'ok', result: { network: walletNetwork } }
@@ -173,8 +173,13 @@ chrome.runtime.onMessage.addListener(
       return true // keep the message channel open for async sendResponse
     }
 
-    // Route internal messages from popup / setup UI (no sender.tab)
+    // Route internal messages from popup / setup UI — must NOT come from
+    // content scripts (sender.tab is set) or other extensions
     if (isInternalMessage(message)) {
+      if (sender.tab !== undefined || sender.id !== chrome.runtime.id) {
+        sendResponse({ id: '', status: 'error', error: 'Unauthorised sender' })
+        return true
+      }
       const response = handleInternalMessage(message)
       sendResponse(response)
       return true
