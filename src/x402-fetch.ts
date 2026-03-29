@@ -11,12 +11,56 @@ import type {
   X402Config,
 } from "./types"
 
-// === Proof construction (stub — requires BRC-100 wallet) ===
+// === Proof construction via BRC-100 wallet (window.CWI) ===
 
-async function defaultConstructProof(_challenge: Challenge): Promise<Proof> {
-  // TODO: Call window.CWI.createAction() to build payment transaction
-  // TODO: Broadcast to BSV network
-  throw new Error("Not implemented — requires BRC-100 wallet (window.CWI)")
+function payeeAddressToLockingScript(address: string): string {
+  // Decode Base58Check BSV address → 20-byte pubkey hash → P2PKH locking script
+  const alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+  let n = BigInt(0)
+  for (const c of address) {
+    const i = alphabet.indexOf(c)
+    if (i < 0) throw new Error(`Invalid Base58 character: ${c}`)
+    n = n * 58n + BigInt(i)
+  }
+  // Convert to 25 bytes (1 version + 20 hash + 4 checksum)
+  let hex = n.toString(16).padStart(50, "0")
+  // Strip version byte (first 2 hex chars) and checksum (last 8 hex chars)
+  const pubkeyHash = hex.slice(2, 42)
+  // OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+  return `76a914${pubkeyHash}88ac`
+}
+
+async function defaultConstructProof(challenge: Challenge): Promise<Proof> {
+  const cwi = (globalThis as any).CWI as import("./types").CWIInterface | undefined
+  if (!cwi || typeof cwi.createAction !== "function") {
+    throw new Error(
+      "No BRC-100 wallet detected. Install a CWI-compliant browser extension " +
+      "or provide a custom proofConstructor in X402Config.",
+    )
+  }
+
+  const result = await cwi.createAction({
+    description: `x402 payment: ${challenge.amount} sats to ${challenge.payee}`,
+    outputs: [{
+      satoshis: challenge.amount,
+      lockingScript: payeeAddressToLockingScript(challenge.payee),
+      description: `Payment to ${challenge.payee}`,
+    }],
+    labels: ["x402-payment"],
+    options: {
+      returnTXIDOnly: false,
+      noSend: false,
+    },
+  })
+
+  if (!result || !result.txid) {
+    throw new Error("Wallet declined payment or returned invalid result")
+  }
+
+  return {
+    txid: result.txid,
+    rawTx: result.rawTx ?? "",
+  }
 }
 
 // === Promise mutex for serialising payment flows ===

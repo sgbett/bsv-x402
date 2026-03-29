@@ -117,6 +117,40 @@ export interface StorageAdapter {
   saveSitePolicies(policies: Record<string, SitePolicy>): Promise<void>
 }
 
+// === BRC-100 CWI interface types ===
+
+export interface CWICreateActionOutput {
+  satoshis: number
+  lockingScript: string
+  description?: string
+}
+
+export interface CWICreateActionParams {
+  description: string
+  outputs: CWICreateActionOutput[]
+  labels?: string[]
+  options?: {
+    returnTXIDOnly?: boolean
+    noSend?: boolean
+  }
+}
+
+export interface CWICreateActionResult {
+  txid: string
+  rawTx?: string
+}
+
+export interface CWIInterface {
+  createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
+  getPublicKey(params?: { identityKey?: boolean }): Promise<{ publicKey: string }>
+  createSignature(params: { data: string; protocolID?: string; keyID?: string }): Promise<{ signature: string }>
+  verifySignature(params: { data: string; signature: string; publicKey: string }): Promise<{ valid: boolean }>
+  encrypt(params: { plaintext: string; protocolID?: string; keyID?: string; counterparty?: string }): Promise<{ ciphertext: string }>
+  decrypt(params: { ciphertext: string; protocolID?: string; keyID?: string; counterparty?: string }): Promise<{ plaintext: string }>
+  isAuthenticated(): Promise<boolean>
+  getNetwork(): Promise<{ network: string }>
+}
+
 // === 2FA ===
 
 export type TwoFactorAction =
