@@ -8,14 +8,42 @@
 // ---------------------------------------------------------------------------
 
 export type CWIMethodName =
-  | 'createAction'
+  // Key management
   | 'getPublicKey'
-  | 'createSignature'
-  | 'verifySignature'
+  | 'revealCounterpartyKeyLinkage'
+  | 'revealSpecificKeyLinkage'
+  // Cryptographic operations
   | 'encrypt'
   | 'decrypt'
+  | 'createHmac'
+  | 'verifyHmac'
+  | 'createSignature'
+  | 'verifySignature'
+  // Transaction management
+  | 'createAction'
+  | 'signAction'
+  | 'abortAction'
+  | 'listActions'
+  | 'internalizeAction'
+  // Output management
+  | 'listOutputs'
+  | 'relinquishOutput'
+  // Certificate management
+  | 'acquireCertificate'
+  | 'listCertificates'
+  | 'proveCertificate'
+  | 'relinquishCertificate'
+  // Certificate discovery
+  | 'discoverByIdentityKey'
+  | 'discoverByAttributes'
+  // Authentication & status
   | 'isAuthenticated'
-  | 'getNetwork';
+  | 'waitForAuthentication'
+  // Blockchain information
+  | 'getHeight'
+  | 'getHeaderForHeight'
+  | 'getNetwork'
+  | 'getVersion';
 
 // ---------------------------------------------------------------------------
 // Page <-> Content script messages (via CustomEvent)

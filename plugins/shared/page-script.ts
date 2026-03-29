@@ -96,38 +96,52 @@
   // CWI object (BRC-100 wallet interface)
   // -----------------------------------------------------------------------
 
+  // All 28 BRC-100 methods — must match BSV Browser's wallet interface exactly.
+  // See: bsv-blockchain/ts-sdk Wallet.interfaces.ts
   const cwi = {
-    createAction(params: unknown) {
-      return callCWI('createAction', params);
-    },
+    // Key management
+    getPublicKey(params?: unknown) { return callCWI('getPublicKey', params); },
+    revealCounterpartyKeyLinkage(params: unknown) { return callCWI('revealCounterpartyKeyLinkage', params); },
+    revealSpecificKeyLinkage(params: unknown) { return callCWI('revealSpecificKeyLinkage', params); },
 
-    getPublicKey(params?: unknown) {
-      return callCWI('getPublicKey', params);
-    },
+    // Cryptographic operations
+    encrypt(params: unknown) { return callCWI('encrypt', params); },
+    decrypt(params: unknown) { return callCWI('decrypt', params); },
+    createHmac(params: unknown) { return callCWI('createHmac', params); },
+    verifyHmac(params: unknown) { return callCWI('verifyHmac', params); },
+    createSignature(params: unknown) { return callCWI('createSignature', params); },
+    verifySignature(params: unknown) { return callCWI('verifySignature', params); },
 
-    createSignature(params: unknown) {
-      return callCWI('createSignature', params);
-    },
+    // Transaction management
+    createAction(params: unknown) { return callCWI('createAction', params); },
+    signAction(params: unknown) { return callCWI('signAction', params); },
+    abortAction(params: unknown) { return callCWI('abortAction', params); },
+    listActions(params: unknown) { return callCWI('listActions', params); },
+    internalizeAction(params: unknown) { return callCWI('internalizeAction', params); },
 
-    verifySignature(params: unknown) {
-      return callCWI('verifySignature', params);
-    },
+    // Output management
+    listOutputs(params: unknown) { return callCWI('listOutputs', params); },
+    relinquishOutput(params: unknown) { return callCWI('relinquishOutput', params); },
 
-    encrypt(params: unknown) {
-      return callCWI('encrypt', params);
-    },
+    // Certificate management
+    acquireCertificate(params: unknown) { return callCWI('acquireCertificate', params); },
+    listCertificates(params: unknown) { return callCWI('listCertificates', params); },
+    proveCertificate(params: unknown) { return callCWI('proveCertificate', params); },
+    relinquishCertificate(params: unknown) { return callCWI('relinquishCertificate', params); },
 
-    decrypt(params: unknown) {
-      return callCWI('decrypt', params);
-    },
+    // Certificate discovery
+    discoverByIdentityKey(params: unknown) { return callCWI('discoverByIdentityKey', params); },
+    discoverByAttributes(params: unknown) { return callCWI('discoverByAttributes', params); },
 
-    isAuthenticated() {
-      return callCWI('isAuthenticated');
-    },
+    // Authentication & status
+    isAuthenticated() { return callCWI('isAuthenticated'); },
+    waitForAuthentication() { return callCWI('waitForAuthentication'); },
 
-    getNetwork() {
-      return callCWI('getNetwork');
-    },
+    // Blockchain information
+    getHeight() { return callCWI('getHeight'); },
+    getHeaderForHeight(params: unknown) { return callCWI('getHeaderForHeight', params); },
+    getNetwork() { return callCWI('getNetwork'); },
+    getVersion() { return callCWI('getVersion'); },
   };
 
   // -----------------------------------------------------------------------

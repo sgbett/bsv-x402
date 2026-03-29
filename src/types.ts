@@ -140,15 +140,60 @@ export interface CWICreateActionResult {
   rawTx?: string
 }
 
+/**
+ * Full BRC-100 CWI (Computing With Integrity) wallet interface.
+ *
+ * This must stay in sync with the BSV Browser implementation
+ * (bsv-blockchain/bsv-browser) and the canonical BRC-100 spec
+ * (bsv-blockchain/ts-sdk Wallet.interfaces.ts).
+ *
+ * All 28 methods are listed. See plugins/shared/cwi-conformance.test.ts
+ * for the conformance test suite that validates interface parity.
+ */
 export interface CWIInterface {
+  // Key management
+  getPublicKey(params?: { identityKey?: boolean; protocolID?: [number, string]; keyID?: string; counterparty?: string; forSelf?: boolean }): Promise<{ publicKey: string }>
+  revealCounterpartyKeyLinkage(params: { counterparty: string; verifier: string; protocolID: [number, string]; keyID: string }): Promise<{ encryptedLinkage: string; encryptedLinkageProof: string }>
+  revealSpecificKeyLinkage(params: { counterparty: string; verifier: string; protocolID: [number, string]; keyID: string }): Promise<{ encryptedLinkage: string; encryptedLinkageProof: string }>
+
+  // Cryptographic operations
+  encrypt(params: { plaintext: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ ciphertext: number[] }>
+  decrypt(params: { ciphertext: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ plaintext: number[] }>
+  createHmac(params: { data: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ hmac: number[] }>
+  verifyHmac(params: { data: number[]; hmac: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ valid: boolean }>
+  createSignature(params: { data?: number[]; hashToDirectlySign?: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ signature: number[] }>
+  verifySignature(params: { data: number[]; signature: number[]; protocolID: [number, string]; keyID: string; counterparty?: string; forSelf?: boolean }): Promise<{ valid: boolean }>
+
+  // Transaction management
   createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
-  getPublicKey(params?: { identityKey?: boolean }): Promise<{ publicKey: string }>
-  createSignature(params: { data: string; protocolID?: string; keyID?: string }): Promise<{ signature: string }>
-  verifySignature(params: { data: string; signature: string; publicKey: string }): Promise<{ valid: boolean }>
-  encrypt(params: { plaintext: string; protocolID?: string; keyID?: string; counterparty?: string }): Promise<{ ciphertext: string }>
-  decrypt(params: { ciphertext: string; protocolID?: string; keyID?: string; counterparty?: string }): Promise<{ plaintext: string }>
-  isAuthenticated(): Promise<boolean>
-  getNetwork(): Promise<{ network: string }>
+  signAction(params: { reference: string }): Promise<{ txid?: string; tx?: number[] }>
+  abortAction(params: { reference: string }): Promise<{ aborted: boolean }>
+  listActions(params: { labels: string[]; labelQueryMode?: 'any' | 'all'; includeLabels?: boolean; includeInputs?: boolean; includeOutputs?: boolean; limit?: number; offset?: number }): Promise<{ totalActions: number; actions: unknown[] }>
+  internalizeAction(params: { tx: number[]; outputs: unknown[] }): Promise<{ accepted: boolean }>
+
+  // Output management
+  listOutputs(params: { basket: string; tags?: string[]; tagQueryMode?: 'any' | 'all'; include?: string; includeCustomInstructions?: boolean; includeTags?: boolean; includeLabels?: boolean; limit?: number; offset?: number }): Promise<{ totalOutputs: number; outputs: unknown[] }>
+  relinquishOutput(params: { basket: string; output: string }): Promise<{ relinquished: boolean }>
+
+  // Certificate management
+  acquireCertificate(params: { type: string; certifier: string; acquisitionProtocol?: string; fields?: Record<string, string> }): Promise<{ type: string; subject: string; serialNumber: string; certifier: string; fields: Record<string, string>; signature: string }>
+  listCertificates(params: { certifiers: string[]; types: string[]; limit?: number; offset?: number }): Promise<{ totalCertificates: number; certificates: unknown[] }>
+  proveCertificate(params: { certificate: unknown; fieldsToReveal: string[]; verifier: string }): Promise<{ keyForVerifier: string }>
+  relinquishCertificate(params: { type: string; serialNumber: string; certifier: string }): Promise<{ relinquished: boolean }>
+
+  // Certificate discovery
+  discoverByIdentityKey(params: { identityKey: string; limit?: number; offset?: number }): Promise<{ totalCertificates: number; certificates: unknown[] }>
+  discoverByAttributes(params: { attributes: Record<string, string>; limit?: number; offset?: number }): Promise<{ totalCertificates: number; certificates: unknown[] }>
+
+  // Authentication & status
+  isAuthenticated(params?: object): Promise<{ authenticated: boolean }>
+  waitForAuthentication(params?: object): Promise<{ authenticated: boolean }>
+
+  // Blockchain information
+  getHeight(params?: object): Promise<{ height: number }>
+  getHeaderForHeight(params: { height: number }): Promise<{ header: string }>
+  getNetwork(params?: object): Promise<{ network: 'mainnet' | 'testnet' }>
+  getVersion(params?: object): Promise<{ version: string }>
 }
 
 // === 2FA ===

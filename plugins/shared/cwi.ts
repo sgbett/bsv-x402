@@ -67,44 +67,41 @@ async function handleCreateAction(
   return { txid: 'TODO', rawTx: '' };
 }
 
+// --- Key management ---
+
 async function handleGetPublicKey(
   _params: unknown,
   _context: CWIHandlerContext,
 ): Promise<unknown> {
-  // TODO: Derive from seed via key-manager
+  // TODO: Derive from seed via key-manager using protocolID/keyID
   return { publicKey: 'TODO' };
 }
 
-async function handleCreateSignature(
+async function handleRevealCounterpartyKeyLinkage(
   params: unknown,
   _context: CWIHandlerContext,
 ): Promise<unknown> {
-  validateParams<{ data: string }>(params, ['data']);
-
-  // TODO: Sign using private key derived from seed via key-manager
-  return { signature: 'TODO' };
+  validateParams(params, ['counterparty', 'verifier']);
+  // TODO: Implement with @bsv/sdk
+  return { encryptedLinkage: 'TODO', encryptedLinkageProof: 'TODO' };
 }
 
-async function handleVerifySignature(
+async function handleRevealSpecificKeyLinkage(
   params: unknown,
   _context: CWIHandlerContext,
 ): Promise<unknown> {
-  validateParams<{ data: string; signature: string; publicKey: string }>(params, [
-    'data',
-    'signature',
-    'publicKey',
-  ]);
-
-  // TODO: Implement signature verification with @bsv/sdk
-  return { valid: false };
+  validateParams(params, ['counterparty', 'verifier', 'protocolID', 'keyID']);
+  // TODO: Implement with @bsv/sdk
+  return { encryptedLinkage: 'TODO', encryptedLinkageProof: 'TODO' };
 }
+
+// --- Cryptographic operations ---
 
 async function handleEncrypt(
   params: unknown,
   _context: CWIHandlerContext,
 ): Promise<unknown> {
-  validateParams<{ plaintext: string }>(params, ['plaintext']);
-
+  validateParams(params, ['plaintext', 'protocolID', 'keyID']);
   // TODO: Implement encryption with @bsv/sdk
   return { ciphertext: 'TODO' };
 }
@@ -113,22 +110,211 @@ async function handleDecrypt(
   params: unknown,
   _context: CWIHandlerContext,
 ): Promise<unknown> {
-  validateParams<{ ciphertext: string }>(params, ['ciphertext']);
-
+  validateParams(params, ['ciphertext', 'protocolID', 'keyID']);
   // TODO: Implement decryption with @bsv/sdk
   return { plaintext: 'TODO' };
 }
 
+async function handleCreateHmac(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['data', 'protocolID', 'keyID']);
+  // TODO: Implement HMAC with @bsv/sdk
+  return { hmac: 'TODO' };
+}
+
+async function handleVerifyHmac(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['data', 'hmac', 'protocolID', 'keyID']);
+  // TODO: Implement HMAC verification with @bsv/sdk
+  return { valid: false };
+}
+
+async function handleCreateSignature(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['protocolID', 'keyID']);
+  // Requires either data or hashToDirectlySign
+  const p = params as Record<string, unknown>;
+  if (!p.data && !p.hashToDirectlySign) {
+    throw new Error('Either data or hashToDirectlySign is required');
+  }
+  // TODO: Sign using private key derived from seed via key-manager
+  return { signature: 'TODO' };
+}
+
+async function handleVerifySignature(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['data', 'signature', 'protocolID', 'keyID']);
+  // TODO: Implement signature verification with @bsv/sdk
+  return { valid: false };
+}
+
+// --- Transaction management ---
+
+async function handleSignAction(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['reference']);
+  // TODO: Implement with @bsv/sdk
+  return { txid: 'TODO', tx: '' };
+}
+
+async function handleAbortAction(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['reference']);
+  // TODO: Implement with @bsv/sdk
+  return { aborted: true };
+}
+
+async function handleListActions(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['labels']);
+  // TODO: Implement with @bsv/sdk
+  return { totalActions: 0, actions: [] };
+}
+
+async function handleInternalizeAction(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['tx', 'outputs']);
+  // TODO: Implement with @bsv/sdk
+  return { accepted: true };
+}
+
+// --- Output management ---
+
+async function handleListOutputs(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['basket']);
+  // TODO: Implement with @bsv/sdk
+  return { totalOutputs: 0, outputs: [] };
+}
+
+async function handleRelinquishOutput(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['basket', 'output']);
+  // TODO: Implement with @bsv/sdk
+  return { relinquished: true };
+}
+
+// --- Certificate management ---
+
+async function handleAcquireCertificate(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['type', 'certifier']);
+  // TODO: Implement with @bsv/sdk
+  return { type: 'TODO', subject: 'TODO', serialNumber: 'TODO', certifier: 'TODO', fields: {}, signature: 'TODO' };
+}
+
+async function handleListCertificates(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['certifiers', 'types']);
+  // TODO: Implement with @bsv/sdk
+  return { totalCertificates: 0, certificates: [] };
+}
+
+async function handleProveCertificate(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['certificate', 'fieldsToReveal', 'verifier']);
+  // TODO: Implement with @bsv/sdk
+  return { keyForVerifier: 'TODO' };
+}
+
+async function handleRelinquishCertificate(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['type', 'serialNumber', 'certifier']);
+  // TODO: Implement with @bsv/sdk
+  return { relinquished: true };
+}
+
+// --- Certificate discovery ---
+
+async function handleDiscoverByIdentityKey(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['identityKey']);
+  // TODO: Implement with @bsv/sdk
+  return { totalCertificates: 0, certificates: [] };
+}
+
+async function handleDiscoverByAttributes(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['attributes']);
+  // TODO: Implement with @bsv/sdk
+  return { totalCertificates: 0, certificates: [] };
+}
+
+// --- Authentication & status ---
+
 async function handleIsAuthenticated(
   context: CWIHandlerContext,
 ): Promise<unknown> {
-  return context.isUnlocked();
+  return { authenticated: context.isUnlocked() };
+}
+
+async function handleWaitForAuthentication(
+  context: CWIHandlerContext,
+): Promise<unknown> {
+  // TODO: Implement blocking wait (poll/event) for unlock
+  return { authenticated: context.isUnlocked() };
+}
+
+// --- Blockchain information ---
+
+async function handleGetHeight(
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  // TODO: Query current block height from network
+  return { height: 0 };
+}
+
+async function handleGetHeaderForHeight(
+  params: unknown,
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  validateParams(params, ['height']);
+  // TODO: Query block header from network
+  return { header: 'TODO' };
 }
 
 async function handleGetNetwork(
   context: CWIHandlerContext,
 ): Promise<unknown> {
-  return { network: context.getNetwork() };
+  return { network: context.getNetwork() === 'main' ? 'mainnet' : 'testnet' };
+}
+
+async function handleGetVersion(
+  _context: CWIHandlerContext,
+): Promise<unknown> {
+  return { version: 'bsv-x402 0.1.0' };
 }
 
 // ---------------------------------------------------------------------------
@@ -139,20 +325,51 @@ type MethodHandler = (params: unknown, context: CWIHandlerContext) => Promise<un
 type ContextOnlyHandler = (context: CWIHandlerContext) => Promise<unknown>;
 
 const methodHandlers: Record<CWIMethodName, MethodHandler | ContextOnlyHandler> = {
-  createAction: handleCreateAction,
+  // Key management
   getPublicKey: handleGetPublicKey,
-  createSignature: handleCreateSignature,
-  verifySignature: handleVerifySignature,
+  revealCounterpartyKeyLinkage: handleRevealCounterpartyKeyLinkage,
+  revealSpecificKeyLinkage: handleRevealSpecificKeyLinkage,
+  // Cryptographic operations
   encrypt: handleEncrypt,
   decrypt: handleDecrypt,
+  createHmac: handleCreateHmac,
+  verifyHmac: handleVerifyHmac,
+  createSignature: handleCreateSignature,
+  verifySignature: handleVerifySignature,
+  // Transaction management
+  createAction: handleCreateAction,
+  signAction: handleSignAction,
+  abortAction: handleAbortAction,
+  listActions: handleListActions,
+  internalizeAction: handleInternalizeAction,
+  // Output management
+  listOutputs: handleListOutputs,
+  relinquishOutput: handleRelinquishOutput,
+  // Certificate management
+  acquireCertificate: handleAcquireCertificate,
+  listCertificates: handleListCertificates,
+  proveCertificate: handleProveCertificate,
+  relinquishCertificate: handleRelinquishCertificate,
+  // Certificate discovery
+  discoverByIdentityKey: handleDiscoverByIdentityKey,
+  discoverByAttributes: handleDiscoverByAttributes,
+  // Authentication & status
   isAuthenticated: handleIsAuthenticated as ContextOnlyHandler,
+  waitForAuthentication: handleWaitForAuthentication as ContextOnlyHandler,
+  // Blockchain information
+  getHeight: handleGetHeight as ContextOnlyHandler,
+  getHeaderForHeight: handleGetHeaderForHeight,
   getNetwork: handleGetNetwork as ContextOnlyHandler,
+  getVersion: handleGetVersion as ContextOnlyHandler,
 };
 
-// Methods that only need the context (no params)
+// Methods that only need the context (no params from the caller)
 const contextOnlyMethods: Set<CWIMethodName> = new Set([
   'isAuthenticated',
+  'waitForAuthentication',
+  'getHeight',
   'getNetwork',
+  'getVersion',
 ]);
 
 // ---------------------------------------------------------------------------
