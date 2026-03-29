@@ -154,9 +154,11 @@ describe("createX402Fetch", () => {
   describe("resetLimits", () => {
     it("clears the circuit breaker", async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(make402Response(999_999_999))
+      const twoFactor = { verify: vi.fn().mockResolvedValue(true) }
       const storage = mockStorage()
       const f = createX402Fetch({
         tier: "I'm Too Young to Die",
+        twoFactorProvider: twoFactor,
         storage,
         now: () => NOW,
       })
@@ -165,7 +167,7 @@ describe("createX402Fetch", () => {
       await f("https://api.example.com/expensive")
       expect(f.getState().circuitBroken).toBe(true)
 
-      // Reset
+      // Reset (2FA provider approves)
       await f.resetLimits()
       expect(f.getState().circuitBroken).toBe(false)
     })
@@ -189,6 +191,78 @@ describe("createX402Fetch", () => {
       })
 
       await expect(f.resetLimits()).rejects.toThrow("2FA verification failed")
+    })
+
+    it("throws when 2FA required but no provider configured", async () => {
+      const storage = mockStorage()
+      const f = createX402Fetch({
+        storage,
+        // No twoFactorProvider — but tier default requires 2FA for reset
+        limits: {
+          require2fa: {
+            onCircuitBreakerReset: true,
+            onTierChange: false,
+            onHighValueTx: false,
+            highValueThreshold: 0,
+            onNewSiteApproval: false,
+          },
+        },
+        now: () => NOW,
+      })
+
+      await expect(f.resetLimits()).rejects.toThrow("no twoFactorProvider configured")
+    })
+  })
+
+  describe("2FA without provider", () => {
+    it("blocks high-value tx when 2FA required but no provider configured", async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue(make402Response(60_000_000))
+      const storage = mockStorage()
+
+      const f = createX402Fetch({
+        storage,
+        // No twoFactorProvider
+        limits: {
+          require2fa: {
+            onCircuitBreakerReset: false,
+            onTierChange: false,
+            onHighValueTx: true,
+            highValueThreshold: 50_000_000,
+            onNewSiteApproval: false,
+          },
+        },
+        now: () => NOW,
+      })
+
+      // 60M exceeds 50M threshold — should be blocked without provider
+      const res = await f("https://api.example.com/expensive")
+      expect(res.status).toBe(402)
+    })
+
+    it("allows tx below 2FA threshold even without provider", async () => {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(make402Response(10_000))
+        .mockResolvedValueOnce(make200Response())
+      const storage = mockStorage()
+
+      const f = createX402Fetch({
+        storage,
+        proofConstructor: async (c) => ({ txid: `mock-${c.nonce}`, rawTx: "00" }),
+        limits: {
+          require2fa: {
+            onCircuitBreakerReset: false,
+            onTierChange: false,
+            onHighValueTx: true,
+            highValueThreshold: 50_000_000,
+            onNewSiteApproval: false,
+          },
+        },
+        now: () => NOW,
+      })
+
+      // 10k is well below 50M threshold — should proceed
+      const res = await f("https://api.example.com/cheap")
+      expect(res.status).toBe(200)
     })
   })
 })

@@ -54,6 +54,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const nowFn = config.now ?? Date.now
   const mutex = createMutex()
 
+  // Warn if tier requires 2FA but no provider is configured
+  const needs2fa = limits.require2fa
+  if (!twoFactor && (needs2fa.onCircuitBreakerReset || needs2fa.onHighValueTx || needs2fa.onNewSiteApproval || needs2fa.onTierChange)) {
+    console.warn("x402: tier requires 2FA but no twoFactorProvider configured — 2FA-gated actions will be blocked")
+  }
+
   let limiter: RateLimiter | undefined
   let initialised = false
 
@@ -119,11 +125,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       }
 
       // 2FA for high-value tx
-      if (
-        twoFactor &&
-        limits.require2fa.onHighValueTx &&
-        challenge.amount > limits.require2fa.highValueThreshold
-      ) {
+      if (limits.require2fa.onHighValueTx && challenge.amount > limits.require2fa.highValueThreshold) {
+        if (!twoFactor) return response // no provider → block
         const verified = await twoFactor.verify({
           type: "high-value-tx",
           amount: challenge.amount,
@@ -152,7 +155,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
   fetchFn.resetLimits = async () => {
     const rl = await ensureInitialised()
-    if (twoFactor && limits.require2fa.onCircuitBreakerReset) {
+    if (limits.require2fa.onCircuitBreakerReset) {
+      if (!twoFactor) throw new Error("2FA required for circuit breaker reset but no twoFactorProvider configured")
       const verified = await twoFactor.verify({ type: "circuit-breaker-reset" })
       if (!verified) throw new Error("2FA verification failed for circuit breaker reset")
     }
