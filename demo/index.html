@@ -446,8 +446,8 @@ function initClient(tierName, nightmareConfirmation) {
     proofConstructor: mockConstructProof,
     twoFactorProvider: createMockTwoFactorProvider(),
     nightmareConfirmation,
-    onLimitReached: () => {
-      log('block', 'CIRCUIT BREAKER TRIPPED — all payments halted')
+    onLimitReached: (reason) => {
+      log('block', `CIRCUIT BREAKER TRIPPED: ${reason}`)
       updateCircuitBreaker(true)
       stopSpam()
     },

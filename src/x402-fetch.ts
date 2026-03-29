@@ -113,7 +113,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       if (result.action === "block") {
         rl.trip()
         await persist(rl)
-        config.onLimitReached?.()
+        config.onLimitReached?.(result.reason)
         return response
       }
 

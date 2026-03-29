@@ -73,7 +73,7 @@ export interface X402Config {
   twoFactorProvider?: TwoFactorProvider
   proofConstructor?: (challenge: Challenge) => Promise<Proof>
   nightmareConfirmation?: string
-  onLimitReached?: () => void
+  onLimitReached?: (reason: string) => void
   onYellowLight?: (detail: YellowLightEvent) => Promise<boolean>
   now?: () => number
 }
