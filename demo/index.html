@@ -187,6 +187,74 @@
   .log-info { color: #68a; }
   .log-pay { color: #8cf; }
   .log-clear { float: right; font-size: 0.75em; padding: 2px 8px; }
+
+  /* Wallet auth modal (Touch ID style) */
+  .wallet-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    justify-content: center;
+    align-items: center;
+  }
+  .wallet-overlay.active { display: flex; }
+  .wallet-modal {
+    background: #1c1c1e;
+    border-radius: 16px;
+    padding: 32px 28px;
+    width: 340px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    border: 1px solid #333;
+  }
+  .wallet-modal-icon {
+    font-size: 48px;
+    margin-bottom: 12px;
+    filter: grayscale(0.2);
+  }
+  .wallet-modal-title {
+    font-size: 1.1em;
+    font-weight: bold;
+    margin-bottom: 6px;
+  }
+  .wallet-modal-subtitle {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .wallet-modal-detail {
+    font-size: 0.85em;
+    color: var(--yellow);
+    margin-bottom: 20px;
+    padding: 8px;
+    background: rgba(240,201,41,0.1);
+    border-radius: 6px;
+  }
+  .wallet-modal-hint {
+    font-size: 0.7em;
+    color: #666;
+    margin-bottom: 16px;
+  }
+  .wallet-modal-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  .wallet-modal-buttons button {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.85em;
+  }
+  .wallet-modal-buttons .approve {
+    background: var(--green);
+    color: #000;
+    border-color: var(--green);
+    font-weight: bold;
+  }
+  .wallet-modal-buttons .approve:hover { background: #3db88a; }
+  .wallet-modal-buttons .deny { border-color: #555; }
 </style>
 </head>
 <body>
@@ -248,12 +316,28 @@
   <div id="window-limits"></div>
 </div>
 
+<!-- Wallet auth modal (Touch ID style) -->
+<div class="wallet-overlay" id="wallet-overlay">
+  <div class="wallet-modal">
+    <div class="wallet-modal-icon" id="wallet-modal-icon"></div>
+    <div class="wallet-modal-title" id="wallet-modal-title"></div>
+    <div class="wallet-modal-subtitle">localhost:3402 is requesting wallet verification</div>
+    <div class="wallet-modal-detail" id="wallet-modal-detail"></div>
+    <div class="wallet-modal-hint">In production, this prompt comes from your BSV Browser wallet</div>
+    <div class="wallet-modal-buttons">
+      <button class="deny" id="wallet-deny">Deny</button>
+      <button class="approve" id="wallet-approve">Approve</button>
+    </div>
+  </div>
+</div>
+
 <!-- Action buttons -->
 <div class="actions">
   <button class="free" onclick="hitEndpoint('/api/free', 0)">Free Endpoint</button>
   <button class="cheap" onclick="hitEndpoint('/api/article', 100000)">Article (100k sats)</button>
   <button class="moderate" onclick="hitEndpoint('/api/premium', 5000000)">Premium (5M sats)</button>
   <button class="expensive" onclick="hitEndpoint('/api/whale', 50000000)">Whale (50M sats)</button>
+  <button class="expensive" onclick="hitEndpoint('/api/vip', 60000000)" style="border-color: #f0c929;">VIP (60M sats, 2FA)</button>
 </div>
 <div class="actions">
   <div class="spam-controls">
@@ -287,6 +371,61 @@ const TIER_DESCRIPTIONS = {
   "Nightmare!": "No limits. No safety net. No sympathy. (BFG ceiling still applies.)",
 }
 
+// --- Mock wallet 2FA provider (Touch ID style) ---
+function createMockTwoFactorProvider() {
+  return {
+    verify(action) {
+      return new Promise((resolve) => {
+        const overlay = document.getElementById('wallet-overlay')
+        const iconEl = document.getElementById('wallet-modal-icon')
+        const titleEl = document.getElementById('wallet-modal-title')
+        const detailEl = document.getElementById('wallet-modal-detail')
+        const approveBtn = document.getElementById('wallet-approve')
+        const denyBtn = document.getElementById('wallet-deny')
+
+        let icon, title, detail
+        switch (action.type) {
+          case 'high-value-tx':
+            icon = '\u{1F6E1}\uFE0F'
+            title = 'Confirm High-Value Payment'
+            detail = `${fmtSats(action.amount)} to ${action.origin}`
+            break
+          case 'circuit-breaker-reset':
+            icon = '\u{1F513}'
+            title = 'Reset Circuit Breaker'
+            detail = 'This re-enables automated payments'
+            break
+          case 'new-site-approval':
+            icon = '\u{1F310}'
+            title = 'Approve New Site'
+            detail = `Allow payments to ${action.origin}?`
+            break
+          default:
+            icon = '\u{1F511}'
+            title = 'Wallet Verification'
+            detail = `Action: ${action.type}`
+        }
+
+        iconEl.textContent = icon
+        titleEl.textContent = title
+        detailEl.textContent = detail
+        overlay.classList.add('active')
+
+        function cleanup() {
+          overlay.classList.remove('active')
+          approveBtn.removeEventListener('click', onApprove)
+          denyBtn.removeEventListener('click', onDeny)
+        }
+        function onApprove() { cleanup(); log('info', `2FA approved: ${title}`); resolve(true) }
+        function onDeny() { cleanup(); log('block', `2FA denied: ${title}`); resolve(false) }
+
+        approveBtn.addEventListener('click', onApprove)
+        denyBtn.addEventListener('click', onDeny)
+      })
+    }
+  }
+}
+
 // --- Mock proof constructor ---
 async function mockConstructProof(challenge) {
   if (mockBalance < challenge.amount) {
@@ -305,6 +444,7 @@ function initClient(tierName, nightmareConfirmation) {
   const config = {
     tier: tierName,
     proofConstructor: mockConstructProof,
+    twoFactorProvider: createMockTwoFactorProvider(),
     nightmareConfirmation,
     onLimitReached: () => {
       log('block', 'CIRCUIT BREAKER TRIPPED — all payments halted')

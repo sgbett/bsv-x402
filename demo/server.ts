@@ -90,6 +90,12 @@ app.get("/api/whale", paidEndpoint(
   "WHALE CONTENT: Exclusive on-chain analytics dashboard with real-time mempool data and mining pool distribution.",
 ))
 
+// VIP — triggers 2FA on "Hey, Not Too Rough" (threshold 50M, this is 60M)
+app.get("/api/vip", paidEndpoint(
+  60_000_000,
+  "VIP ACCESS: Full historical blockchain dataset with raw block data, transaction graphs, and UTXO snapshots.",
+))
+
 app.listen(PORT, () => {
   console.log(`
   ╔══════════════════════════════════════════════╗
@@ -102,6 +108,7 @@ app.listen(PORT, () => {
   ║     GET /api/article   — 402 (100k sats)     ║
   ║     GET /api/premium   — 402 (5M sats)       ║
   ║     GET /api/whale     — 402 (50M sats)      ║
+  ║     GET /api/vip       — 402 (60M sats) 2FA  ║
   ╚══════════════════════════════════════════════╝
   `)
 })
