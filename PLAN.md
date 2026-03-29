@@ -6,6 +6,10 @@ The goal is to add three browser extension packages (Chromium, Firefox, Safari) 
 
 The extensions share approximately 90% of their code. The browser-specific portions are limited to manifest files and minor API adapter shims (Chrome uses `chrome.runtime`, Firefox uses `browser.runtime`, Safari wraps via a native app container).
 
+### Architecture Overview
+
+<img width="8192" height="4313" alt="mermaid-ai-diagram-2026-03-29-123250" src="https://github.com/user-attachments/assets/34beb35a-8d1e-40c9-857e-ee7c6710024b" />
+
 ### Reference Implementation
 
 The [bsv-blockchain/bsv-browser](https://github.com/bsv-blockchain/bsv-browser) is a React Native mobile app (not a Chrome extension). It injects wallet functionality into a WebView via `postMessage` / `injectJavaScript`. Its message protocol uses `type: 'CWI'` events with request IDs — we adopt this same request/response pattern for our extension's page script.
