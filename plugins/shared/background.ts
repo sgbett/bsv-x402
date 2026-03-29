@@ -3,25 +3,22 @@
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import { handleCWIRequest, type CWIHandlerContext } from './cwi'
 import { ExtensionStorageAdapter } from './storage-bridge'
+import { SessionManager, encryptSeed, saveSeed } from './key-manager'
 import { RateLimiter, resolveSpendLimits } from '../../src/limits'
 import type { Challenge, LimitCheckResult, SpendMode, TierName } from '../../src/types'
 
 // ---------------------------------------------------------------------------
-// Session state (placeholder — real SessionManager from key-manager.ts will
-// be wired in later)
+// Session state
 // ---------------------------------------------------------------------------
 
-let sessionSeed: string | null = null
+const session = new SessionManager()
 let walletNetwork = 'main'
 let currentTier: TierName = 'Hey, Not Too Rough'
 let currentMode: SpendMode = 'interactive'
 
 const context: CWIHandlerContext = {
-  getSeed: () => {
-    if (!sessionSeed) throw new Error('Wallet is locked')
-    return sessionSeed
-  },
-  isUnlocked: () => sessionSeed !== null,
+  getSeed: () => session.getSeed(),
+  isUnlocked: () => session.isUnlocked(),
   getNetwork: () => walletNetwork,
 }
 
@@ -88,21 +85,24 @@ function isCWIMessage(msg: unknown): msg is ContentToBackgroundMessage {
   return typeof msg === 'object' && msg !== null && 'request' in msg
 }
 
-function handleInternalMessage(message: InternalMessage): CWIResponse | Record<string, unknown> {
+async function handleInternalMessage(message: InternalMessage): Promise<CWIResponse | Record<string, unknown>> {
   switch (message.type) {
     case 'unlock': {
       const payload = message.payload as { password: string } | undefined
       if (!payload?.password) {
         return { id: '', status: 'error', error: 'Password required' }
       }
-      // TODO: use SessionManager to derive seed from password
-      sessionSeed = 'placeholder-seed'
+      try {
+        await session.unlock(payload.password)
+      } catch (err) {
+        return { id: '', status: 'error', error: err instanceof Error ? err.message : 'Unlock failed' }
+      }
       console.log('x402: wallet unlocked')
       return { id: '', status: 'ok', result: { unlocked: true } }
     }
 
     case 'lock':
-      sessionSeed = null
+      session.lock()
       console.log('x402: wallet locked')
       return { id: '', status: 'ok', result: { unlocked: false } }
 
@@ -118,12 +118,17 @@ function handleInternalMessage(message: InternalMessage): CWIResponse | Record<s
     }
 
     case 'setup': {
-      const payload = message.payload as { password: string } | undefined
-      if (!payload?.password) {
-        return { id: '', status: 'error', error: 'Password required' }
+      const payload = message.payload as { seed: string; password: string } | undefined
+      if (!payload?.password || !payload?.seed) {
+        return { id: '', status: 'error', error: 'Seed and password required' }
       }
-      // TODO: real key generation via SessionManager
-      sessionSeed = 'new-wallet-seed'
+      try {
+        const encrypted = await encryptSeed(payload.seed, payload.password)
+        await saveSeed(encrypted)
+        await session.unlock(payload.password)
+      } catch (err) {
+        return { id: '', status: 'error', error: err instanceof Error ? err.message : 'Setup failed' }
+      }
       console.log('x402: wallet set up')
       return { id: '', status: 'ok', result: { unlocked: true } }
     }
@@ -180,8 +185,11 @@ chrome.runtime.onMessage.addListener(
         sendResponse({ id: '', status: 'error', error: 'Unauthorised sender' })
         return true
       }
-      const response = handleInternalMessage(message)
-      sendResponse(response)
+      handleInternalMessage(message)
+        .then((response) => sendResponse(response))
+        .catch((err) => {
+          sendResponse({ id: '', status: 'error', error: err instanceof Error ? err.message : String(err) })
+        })
       return true
     }
 
@@ -211,9 +219,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.alarms.create('auto-lock', { periodInMinutes: 15 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'auto-lock' && sessionSeed) {
-    // Only lock if idle — for now always lock on timer
-    sessionSeed = null
+  if (alarm.name === 'auto-lock' && session.isUnlocked()) {
+    session.lock()
     console.log('x402: wallet auto-locked after idle timeout')
   }
 })
