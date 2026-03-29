@@ -111,8 +111,10 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       const result: LimitCheckResult = rl.check(challenge, origin)
 
       if (result.action === "block") {
-        rl.trip()
-        await persist(rl)
+        if (result.severity === "trip") {
+          rl.trip()
+          await persist(rl)
+        }
         config.onLimitReached?.(result.reason)
         return response
       }

@@ -226,24 +226,24 @@ export class RateLimiter {
 
   check(challenge: Challenge, origin: string): LimitCheckResult {
     if (this.broken) {
-      return { action: "block", reason: "Circuit breaker tripped — call resetLimits() to clear" }
+      return { action: "block", reason: "Circuit breaker tripped — call resetLimits() to clear", severity: "trip" }
     }
 
     // BFG per-tx ceiling — unconditional
     if (challenge.amount > BFG_PER_TX_CEILING_SATOSHIS) {
-      return { action: "block", reason: `Exceeds BFG per-tx ceiling (${BFG_PER_TX_CEILING_SATOSHIS} sats)` }
+      return { action: "block", reason: `Exceeds BFG per-tx ceiling (${BFG_PER_TX_CEILING_SATOSHIS} sats)`, severity: "reject" }
     }
 
-    // BFG daily ceiling — unconditional
+    // BFG daily ceiling — unconditional, trips breaker (something catastrophic)
     const dayAgo = this.now() - WINDOW_MS.day
     const dailyTotal = this.sumSatoshis(dayAgo)
     if (dailyTotal + challenge.amount > BFG_DAILY_CEILING_SATOSHIS) {
-      return { action: "block", reason: `Exceeds BFG daily ceiling (${BFG_DAILY_CEILING_SATOSHIS} sats)` }
+      return { action: "block", reason: `Exceeds BFG daily ceiling (${BFG_DAILY_CEILING_SATOSHIS} sats)`, severity: "trip" }
     }
 
-    // Per-tx max from config
+    // Per-tx max from config — routine rejection, no breaker
     if (challenge.amount > this.limits.perTxMaxSatoshis) {
-      return { action: "block", reason: `Exceeds per-tx limit (${this.limits.perTxMaxSatoshis} sats)` }
+      return { action: "block", reason: `Exceeds per-tx limit (${this.limits.perTxMaxSatoshis} sats)`, severity: "reject" }
     }
 
     // Check each window limit — also resolve per-site overrides
@@ -251,7 +251,7 @@ export class RateLimiter {
     const effectivePerTx = this.effectivePerTxMax(origin)
 
     if (effectivePerTx !== undefined && challenge.amount > effectivePerTx) {
-      return { action: "block", reason: `Exceeds per-tx limit for ${origin} (${effectivePerTx} sats)` }
+      return { action: "block", reason: `Exceeds per-tx limit for ${origin} (${effectivePerTx} sats)`, severity: "reject" }
     }
 
     let yellowLight: YellowLightEvent | undefined
@@ -263,11 +263,11 @@ export class RateLimiter {
       const totalTx = windowEntries.length
 
       if (totalSats + challenge.amount > wl.maxSatoshis) {
-        return { action: "block", reason: `Exceeds ${wl.window} sats limit (${wl.maxSatoshis})` }
+        return { action: "block", reason: `Exceeds ${wl.window} sats limit (${wl.maxSatoshis})`, severity: "reject" }
       }
 
       if (totalTx + 1 > wl.maxTransactions) {
-        return { action: "block", reason: `Exceeds ${wl.window} tx count limit (${wl.maxTransactions})` }
+        return { action: "block", reason: `Exceeds ${wl.window} tx count limit (${wl.maxTransactions})`, severity: "reject" }
       }
 
       // Yellow light check

@@ -65,7 +65,7 @@ describe("createX402Fetch", () => {
     expect(res.status).toBe(402)
   })
 
-  it("blocks payment when per-tx limit exceeded and trips circuit breaker", async () => {
+  it("blocks per-tx limit exceeded without tripping circuit breaker", async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(make402Response(999_999_999))
     const onLimitReached = vi.fn()
     const storage = mockStorage()
@@ -79,26 +79,68 @@ describe("createX402Fetch", () => {
 
     // 999M sats exceeds per-tx max (100M for interactive Too Young to Die)
     const res = await f("https://api.example.com/expensive")
-    expect(res.status).toBe(402) // Original 402 returned
+    expect(res.status).toBe(402)
     expect(onLimitReached).toHaveBeenCalledOnce()
+    // Per-tx blocks are routine rejections — breaker should NOT trip
+    expect(f.getState().circuitBroken).toBe(false)
+  })
+
+  it("trips circuit breaker on BFG daily ceiling", async () => {
+    // Use Nightmare with tight limits to accumulate spend then hit BFG daily ceiling
+    // BFG per-tx ceiling is 1B, BFG daily ceiling is 10B
+    // Make 11 payments of 999M each (under per-tx BFG) to exceed daily BFG
+    const storage = mockStorage()
+    const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock", rawTx: "00" })
+
+    const f = createX402Fetch({
+      tier: "Nightmare!",
+      nightmareConfirmation: "NIGHTMARE",
+      storage,
+      proofConstructor,
+      now: () => NOW,
+    })
+
+    // Make 10 payments of 999M each = 9.99B (just under 10B daily BFG)
+    for (let i = 0; i < 10; i++) {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(make402Response(999_000_000))
+        .mockResolvedValueOnce(make200Response())
+      await f("https://api.example.com/big")
+    }
+    expect(f.getState().circuitBroken).toBe(false)
+
+    // 11th payment pushes over 10B daily BFG ceiling → trips breaker
+    globalThis.fetch = vi.fn().mockResolvedValue(make402Response(999_000_000))
+    await f("https://api.example.com/toomuch")
     expect(f.getState().circuitBroken).toBe(true)
   })
 
   it("blocks all payments after circuit breaker trips", async () => {
-    globalThis.fetch = vi.fn().mockResolvedValue(make402Response(999_999_999))
     const storage = mockStorage()
+    const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock", rawTx: "00" })
 
     const f = createX402Fetch({
-      tier: "I'm Too Young to Die",
+      tier: "Nightmare!",
+      nightmareConfirmation: "NIGHTMARE",
       storage,
+      proofConstructor,
       now: () => NOW,
     })
 
-    // Trip the breaker
-    await f("https://api.example.com/expensive")
+    // Accumulate past BFG daily ceiling
+    for (let i = 0; i < 11; i++) {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(make402Response(999_000_000))
+        .mockResolvedValueOnce(make200Response())
+      await f("https://api.example.com/big")
+    }
+    // 11th should have tripped (10.989B > 10B)... but the 11th payment succeeded
+    // because check runs before record. The 12th will see the accumulated total.
+    globalThis.fetch = vi.fn().mockResolvedValue(make402Response(1))
+    await f("https://api.example.com/trip")
     expect(f.getState().circuitBroken).toBe(true)
 
-    // Even a cheap payment should be blocked
+    // Now even a cheap payment should be blocked
     globalThis.fetch = vi.fn().mockResolvedValue(make402Response(1))
     const res = await f("https://api.example.com/cheap")
     expect(res.status).toBe(402)
@@ -153,18 +195,28 @@ describe("createX402Fetch", () => {
 
   describe("resetLimits", () => {
     it("clears the circuit breaker", async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(make402Response(999_999_999))
       const twoFactor = { verify: vi.fn().mockResolvedValue(true) }
       const storage = mockStorage()
+      const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock", rawTx: "00" })
+
       const f = createX402Fetch({
-        tier: "I'm Too Young to Die",
+        tier: "Nightmare!",
+        nightmareConfirmation: "NIGHTMARE",
         twoFactorProvider: twoFactor,
         storage,
+        proofConstructor,
         now: () => NOW,
       })
 
-      // Trip the breaker
-      await f("https://api.example.com/expensive")
+      // Accumulate past BFG daily ceiling to trip breaker
+      for (let i = 0; i < 11; i++) {
+        globalThis.fetch = vi.fn()
+          .mockResolvedValueOnce(make402Response(999_000_000))
+          .mockResolvedValueOnce(make200Response())
+        await f("https://api.example.com/big")
+      }
+      globalThis.fetch = vi.fn().mockResolvedValue(make402Response(1))
+      await f("https://api.example.com/trip")
       expect(f.getState().circuitBroken).toBe(true)
 
       // Reset (2FA provider approves)

@@ -101,10 +101,12 @@ export interface LimitState {
   hmac: string
 }
 
+export type BlockSeverity = "reject" | "trip"
+
 export type LimitCheckResult =
   | { action: "allow" }
   | { action: "yellow-light"; detail: YellowLightEvent }
-  | { action: "block"; reason: string }
+  | { action: "block"; reason: string; severity: BlockSeverity }
 
 // === Storage ===
 

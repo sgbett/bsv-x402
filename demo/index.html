@@ -447,9 +447,14 @@ function initClient(tierName, nightmareConfirmation) {
     twoFactorProvider: createMockTwoFactorProvider(),
     nightmareConfirmation,
     onLimitReached: (reason) => {
-      log('block', `CIRCUIT BREAKER TRIPPED: ${reason}`)
-      updateCircuitBreaker(true)
-      stopSpam()
+      const state = client.getState()
+      if (state.circuitBroken) {
+        log('block', `CIRCUIT BREAKER TRIPPED: ${reason}`)
+        updateCircuitBreaker(true)
+        stopSpam()
+      } else {
+        log('yellow', `BLOCKED: ${reason}`)
+      }
     },
     onYellowLight: async (detail) => {
       const pct = Math.round((detail.currentSpend / detail.limit) * 100)
@@ -696,6 +701,9 @@ function fmtSats(sats) {
 }
 
 // --- Boot ---
+// Demo always starts with a clean slate
+localStorage.removeItem('x402:limit-state')
+localStorage.removeItem('x402:site-policies')
 initClient('Hey, Not Too Rough')
 updateHealthBar()
 updateStats()
