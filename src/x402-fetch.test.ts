@@ -160,6 +160,7 @@ describe("createX402Fetch", () => {
         windows: [{ window: "hour", maxSatoshis: 100_000, maxTransactions: 100 }],
         perTxMaxSatoshis: 100_000,
         yellowLightThreshold: 0.5,
+        requirePerSitePrompt: false,
       },
     })
 

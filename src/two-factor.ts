@@ -18,7 +18,7 @@ export class WalletTwoFactorProvider implements TwoFactorProvider {
       return this.promptFallback(action)
     }
 
-    const challengeData = `x402-2fa:${action.type}:${Date.now()}`
+    const challengeData = `x402-2fa:${JSON.stringify(action)}:${Date.now()}`
     try {
       const sig = await window.CWI.createSignature({
         data: new TextEncoder().encode(challengeData),

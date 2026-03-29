@@ -1,4 +1,4 @@
-import type { LimitState, SitePolicy, StorageAdapter } from "./types"
+import type { LedgerEntry, LimitState, SitePolicy, StorageAdapter } from "./types"
 
 const STATE_KEY = "x402:limit-state"
 const POLICIES_KEY = "x402:site-policies"
@@ -43,21 +43,36 @@ export class LocalStorageAdapter implements StorageAdapter {
     const raw = this.storage.getItem(STATE_KEY)
     if (!raw) return null
 
-    const state: LimitState = JSON.parse(raw)
+    let state: LimitState
+    try {
+      state = JSON.parse(raw)
+    } catch {
+      console.warn("x402: limit state JSON parse failed — treating as tampered")
+      return { entries: [], circuitBroken: true, hmac: "" }
+    }
 
-    if (this.keyDeriver && state.hmac) {
+    if (this.keyDeriver) {
+      if (!state.hmac) {
+        console.warn("x402: limit state missing HMAC — treating as tampered")
+        return { entries: [], circuitBroken: true, hmac: "" }
+      }
       const key = await this.keyDeriver()
       const expected = await computeHmac(serializeForHmac(state), key)
       if (expected !== state.hmac) {
         console.warn("x402: limit state HMAC mismatch — state may have been tampered with")
-        // Trip the circuit breaker on tampered state
-        return {
-          entries: [],
-          circuitBroken: true,
-          hmac: "",
-        }
+        return { entries: [], circuitBroken: true, hmac: "" }
       }
     }
+
+    // Sanitise loaded entries — drop anything that could corrupt limit calculations
+    state.entries = (Array.isArray(state.entries) ? state.entries : []).filter(
+      (e): e is LedgerEntry =>
+        e != null &&
+        typeof e.origin === "string" &&
+        typeof e.txid === "string" &&
+        typeof e.satoshis === "number" && Number.isFinite(e.satoshis) && e.satoshis >= 0 &&
+        typeof e.timestamp === "number" && Number.isFinite(e.timestamp) && e.timestamp > 0,
+    )
 
     return state
   }
@@ -73,7 +88,11 @@ export class LocalStorageAdapter implements StorageAdapter {
   async loadSitePolicies(): Promise<Record<string, SitePolicy>> {
     const raw = this.storage.getItem(POLICIES_KEY)
     if (!raw) return {}
-    return JSON.parse(raw)
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return {}
+    }
   }
 
   async saveSitePolicies(policies: Record<string, SitePolicy>): Promise<void> {

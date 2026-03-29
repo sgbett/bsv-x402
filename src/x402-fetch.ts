@@ -90,7 +90,13 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
     const challengeHeader = response.headers.get("X402-Challenge")
     if (!challengeHeader) return response
 
-    const challenge = parseChallenge(challengeHeader)
+    let challenge: Challenge
+    try {
+      challenge = parseChallenge(challengeHeader)
+    } catch {
+      // Malformed challenge from untrusted server — treat as non-payable
+      return response
+    }
     const origin = extractOrigin(input)
 
     // Serialise the payment decision + construction
@@ -208,15 +214,35 @@ export async function x402Fetch(
 
 // === Helpers ===
 
+function resolveRelativeUrl(url: string): string {
+  const loc = (globalThis as typeof globalThis & { location?: { href?: string } }).location
+  if (loc?.href) {
+    return new URL(url, loc.href).origin
+  }
+  return "unknown"
+}
+
 function extractOrigin(input: RequestInfo | URL): string {
   if (input instanceof URL) return input.origin
   if (typeof input === "string") {
     try {
       return new URL(input).origin
     } catch {
-      return "unknown"
+      try {
+        return resolveRelativeUrl(input)
+      } catch {
+        return "unknown"
+      }
     }
   }
   // Request object
-  return new URL(input.url).origin
+  try {
+    return new URL(input.url).origin
+  } catch {
+    try {
+      return resolveRelativeUrl(input.url)
+    } catch {
+      return "unknown"
+    }
+  }
 }

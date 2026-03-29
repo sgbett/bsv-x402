@@ -184,24 +184,36 @@ export const TIER_PRESETS: Record<TierName, TierPreset> = {
   "Nightmare!": NIGHTMARE,
 }
 
+function cloneSpendLimits(preset: SpendLimits): SpendLimits {
+  return {
+    ...preset,
+    windows: preset.windows.map((w) => ({ ...w })),
+    require2fa: { ...preset.require2fa },
+    sitePolicies: { ...preset.sitePolicies },
+  }
+}
+
 export function resolveSpendLimits(
   tier: TierName = "Hey, Not Too Rough",
   mode: SpendMode = "interactive",
   overrides?: Partial<SpendLimits>,
 ): SpendLimits {
   const preset = TIER_PRESETS[tier][mode]
-  if (!overrides) return { ...preset }
+  const base = cloneSpendLimits(preset)
+
+  if (!overrides) return base
+
   return {
-    ...preset,
+    ...base,
     ...overrides,
     // Deep-merge require2fa if provided
     require2fa: overrides.require2fa
-      ? { ...preset.require2fa, ...overrides.require2fa }
-      : preset.require2fa,
+      ? { ...base.require2fa, ...overrides.require2fa }
+      : base.require2fa,
     // Deep-merge sitePolicies if provided
     sitePolicies: overrides.sitePolicies
-      ? { ...preset.sitePolicies, ...overrides.sitePolicies }
-      : { ...preset.sitePolicies },
+      ? { ...base.sitePolicies, ...overrides.sitePolicies }
+      : base.sitePolicies,
   }
 }
 
@@ -247,6 +259,7 @@ export class RateLimiter {
     }
 
     // Check each window limit — also resolve per-site overrides
+    const isCustomSite = this.hasCustomPolicy(origin)
     const effectiveLimits = this.effectiveWindows(origin)
     const effectivePerTx = this.effectivePerTxMax(origin)
 
@@ -258,7 +271,8 @@ export class RateLimiter {
 
     for (const wl of effectiveLimits) {
       const cutoff = this.now() - windowToMs(wl.window)
-      const windowEntries = this.entriesInWindow(cutoff, origin, wl === effectiveLimits[0] ? undefined : origin)
+      // Custom site policies filter by origin; global windows include all origins
+      const windowEntries = this.entriesInWindow(cutoff, isCustomSite ? origin : undefined)
       const totalSats = windowEntries.reduce((sum, e) => sum + e.satoshis, 0)
       const totalTx = windowEntries.length
 
@@ -318,6 +332,11 @@ export class RateLimiter {
     }
   }
 
+  private hasCustomPolicy(origin: string): boolean {
+    const policy = this.limits.sitePolicies[origin]
+    return policy?.action === "custom" && !!policy.limits
+  }
+
   private effectiveWindows(origin: string): WindowLimit[] {
     const policy = this.limits.sitePolicies[origin]
     if (policy?.action === "custom" && policy.limits) {
@@ -334,8 +353,10 @@ export class RateLimiter {
     return undefined
   }
 
-  private entriesInWindow(cutoff: number, _origin: string, _filterOrigin?: string): LedgerEntry[] {
-    return this.entries.filter((e) => e.timestamp >= cutoff)
+  private entriesInWindow(cutoff: number, filterOrigin?: string): LedgerEntry[] {
+    return this.entries.filter(
+      (e) => e.timestamp >= cutoff && (filterOrigin === undefined || e.origin === filterOrigin),
+    )
   }
 
   private sumSatoshis(cutoff: number): number {
@@ -345,10 +366,24 @@ export class RateLimiter {
   }
 
   private prune(): void {
-    const longestWindow = this.limits.windows.reduce(
-      (max, wl) => Math.max(max, windowToMs(wl.window)),
-      WINDOW_MS.day, // Always keep at least a day for BFG daily check
-    )
+    let longestWindow = WINDOW_MS.day // Always keep at least a day for BFG daily check
+
+    // Global windows
+    for (const wl of this.limits.windows) {
+      longestWindow = Math.max(longestWindow, windowToMs(wl.window))
+    }
+
+    // Custom per-site windows — entries for these must also be retained
+    if (this.limits.sitePolicies) {
+      for (const policy of Object.values(this.limits.sitePolicies)) {
+        if (policy?.action === "custom" && Array.isArray(policy.limits)) {
+          for (const wl of policy.limits) {
+            longestWindow = Math.max(longestWindow, windowToMs(wl.window))
+          }
+        }
+      }
+    }
+
     const cutoff = this.now() - longestWindow
     this.entries = this.entries.filter((e) => e.timestamp >= cutoff)
   }

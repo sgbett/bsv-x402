@@ -37,7 +37,10 @@ export async function resolveSitePolicy(
   }
 
   // 2FA gate for new site approval
-  if (twoFactorProvider && limits.require2fa.onNewSiteApproval) {
+  if (limits.require2fa.onNewSiteApproval) {
+    if (!twoFactorProvider) {
+      return { origin, action: "block" }
+    }
     const verified = await twoFactorProvider.verify({
       type: "new-site-approval",
       origin,
