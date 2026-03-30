@@ -32,6 +32,7 @@
     "url": "https://github.com/sgbett/bsv-x402.git"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.38",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "tsup": "^8.0.0",

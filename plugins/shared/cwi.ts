@@ -54,11 +54,11 @@ async function handleCreateAction(
       throw new Error(`outputs[${i}] must be an object`);
     }
     const o = output as Record<string, unknown>;
-    if (typeof o.satoshis !== 'number') {
-      throw new Error(`outputs[${i}].satoshis must be a number`);
+    if (typeof o.satoshis !== 'number' || !Number.isFinite(o.satoshis) || !Number.isInteger(o.satoshis) || o.satoshis <= 0) {
+      throw new Error(`outputs[${i}].satoshis must be a positive integer`);
     }
-    if (typeof o.lockingScript !== 'string') {
-      throw new Error(`outputs[${i}].lockingScript must be a string`);
+    if (typeof o.lockingScript !== 'string' || o.lockingScript.length === 0) {
+      throw new Error(`outputs[${i}].lockingScript must be a non-empty string`);
     }
   }
 
@@ -103,7 +103,7 @@ async function handleEncrypt(
 ): Promise<unknown> {
   validateParams(params, ['plaintext', 'protocolID', 'keyID']);
   // TODO: Implement encryption with @bsv/sdk
-  return { ciphertext: 'TODO' };
+  return { ciphertext: [] as number[] };
 }
 
 async function handleDecrypt(
@@ -112,7 +112,7 @@ async function handleDecrypt(
 ): Promise<unknown> {
   validateParams(params, ['ciphertext', 'protocolID', 'keyID']);
   // TODO: Implement decryption with @bsv/sdk
-  return { plaintext: 'TODO' };
+  return { plaintext: [] as number[] };
 }
 
 async function handleCreateHmac(
@@ -121,7 +121,7 @@ async function handleCreateHmac(
 ): Promise<unknown> {
   validateParams(params, ['data', 'protocolID', 'keyID']);
   // TODO: Implement HMAC with @bsv/sdk
-  return { hmac: 'TODO' };
+  return { hmac: [] as number[] };
 }
 
 async function handleVerifyHmac(
@@ -382,8 +382,13 @@ export async function handleCWIRequest(
 ): Promise<CWIResponse> {
   const { request, origin: _origin } = message;
 
+  // Methods that work even when the wallet is locked
+  const allowedWhileLocked: Set<CWIMethodName> = new Set([
+    'isAuthenticated', 'waitForAuthentication', 'getVersion', 'getNetwork',
+  ]);
+
   try {
-    if (!context.isUnlocked()) {
+    if (!context.isUnlocked() && !allowedWhileLocked.has(request.method)) {
       return { id: request.id, status: 'error', error: 'Wallet is locked' };
     }
 

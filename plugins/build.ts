@@ -1,5 +1,5 @@
 import { execSync } from 'child_process'
-import { cpSync, mkdirSync, existsSync } from 'fs'
+import { cpSync, mkdirSync, existsSync, renameSync, readdirSync } from 'fs'
 import { resolve, join } from 'path'
 
 const ROOT = resolve(__dirname, '..')
@@ -65,7 +65,14 @@ function buildTarget(target: Target) {
 
   // Rename .mjs outputs to .js for extension compatibility
   // tsup ESM outputs .mjs, but manifests reference .js
-  // (tsup with --format iife should output .js already, but handle both)
+  for (const dir of [outDir, join(outDir, 'ui')]) {
+    if (!existsSync(dir)) continue
+    for (const file of readdirSync(dir)) {
+      if (file.endsWith('.mjs')) {
+        renameSync(join(dir, file), join(dir, file.replace(/\.mjs$/, '.js')))
+      }
+    }
+  }
 
   console.log(`✅ ${target} built → ${outDir}`)
 }

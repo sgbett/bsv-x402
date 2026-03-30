@@ -70,7 +70,15 @@ function updateUI(state: WalletState): void {
 }
 
 function sendMessage(msg: Record<string, unknown>): Promise<WalletState> {
-  return chrome.runtime.sendMessage(msg);
+  return new Promise<WalletState>((resolve, reject) => {
+    chrome.runtime.sendMessage(msg, (response) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(response as WalletState);
+    });
+  });
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -121,7 +129,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Set up wallet
   $<HTMLButtonElement>("setup-btn").addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("setup.html") });
+    chrome.tabs.create({ url: chrome.runtime.getURL("ui/setup.html") });
   });
 
   // Settings

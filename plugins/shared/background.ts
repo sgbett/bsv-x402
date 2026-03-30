@@ -3,7 +3,7 @@
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import { handleCWIRequest, type CWIHandlerContext } from './cwi'
 import { ExtensionStorageAdapter } from './storage-bridge'
-import { SessionManager, encryptSeed, saveSeed } from './key-manager'
+import { SessionManager, encryptSeed, saveSeed, loadSeed } from './key-manager'
 import { RateLimiter, resolveSpendLimits } from '../../src/limits'
 import type { Challenge, LimitCheckResult, SpendMode, TierName } from '../../src/types'
 
@@ -49,7 +49,7 @@ export async function checkSpendLimits(challenge: Challenge, origin: string): Pr
   if (result.action === 'allow') return { allowed: true }
   if (result.action === 'yellow-light') {
     // TODO: open approve.html popup for user confirmation
-    return { allowed: true } // permissive for now
+    return { allowed: false, reason: 'User approval required for this spend' }
   }
   if (result.action === 'block') {
     if (result.severity === 'trip') {
@@ -85,52 +85,54 @@ function isCWIMessage(msg: unknown): msg is ContentToBackgroundMessage {
   return typeof msg === 'object' && msg !== null && 'request' in msg
 }
 
-async function handleInternalMessage(message: InternalMessage): Promise<CWIResponse | Record<string, unknown>> {
+async function getWalletState(): Promise<Record<string, unknown>> {
+  const encrypted = await loadSeed()
+  return {
+    isSetUp: encrypted !== null,
+    isUnlocked: session.isUnlocked(),
+    network: walletNetwork,
+    tier: currentTier,
+  }
+}
+
+async function handleInternalMessage(message: InternalMessage): Promise<Record<string, unknown>> {
   switch (message.type) {
     case 'unlock': {
       const payload = message.payload as { password: string } | undefined
       if (!payload?.password) {
-        return { id: '', status: 'error', error: 'Password required' }
+        throw new Error('Password required')
       }
-      try {
-        await session.unlock(payload.password)
-      } catch (err) {
-        return { id: '', status: 'error', error: err instanceof Error ? err.message : 'Unlock failed' }
-      }
+      await session.unlock(payload.password)
       console.log('x402: wallet unlocked')
-      return { id: '', status: 'ok', result: { unlocked: true } }
+      return getWalletState()
     }
 
     case 'lock':
       session.lock()
       console.log('x402: wallet locked')
-      return { id: '', status: 'ok', result: { unlocked: false } }
+      return getWalletState()
 
     case 'getState':
-      return { isUnlocked: context.isUnlocked(), network: walletNetwork, tier: currentTier }
+      return getWalletState()
 
     case 'setNetwork': {
       const payload = message.payload as { network: string } | undefined
       if (payload?.network === 'main' || payload?.network === 'test') {
         walletNetwork = payload.network
       }
-      return { id: '', status: 'ok', result: { network: walletNetwork } }
+      return getWalletState()
     }
 
     case 'setup': {
       const payload = message.payload as { seed: string; password: string } | undefined
       if (!payload?.password || !payload?.seed) {
-        return { id: '', status: 'error', error: 'Seed and password required' }
+        throw new Error('Seed and password required')
       }
-      try {
-        const encrypted = await encryptSeed(payload.seed, payload.password)
-        await saveSeed(encrypted)
-        await session.unlock(payload.password)
-      } catch (err) {
-        return { id: '', status: 'error', error: err instanceof Error ? err.message : 'Setup failed' }
-      }
+      const encrypted = await encryptSeed(payload.seed, payload.password)
+      await saveSeed(encrypted)
+      await session.unlock(payload.password)
       console.log('x402: wallet set up')
-      return { id: '', status: 'ok', result: { unlocked: true } }
+      return getWalletState()
     }
 
     case 'setTier': {
@@ -140,11 +142,11 @@ async function handleInternalMessage(message: InternalMessage): Promise<CWIRespo
         limiter = null // reset limiter so it picks up new tier
         console.log(`x402: tier changed to "${currentTier}"`)
       }
-      return { id: '', status: 'ok', result: { tier: currentTier } }
+      return getWalletState()
     }
 
     default:
-      return { id: '', status: 'error', error: `Unknown message type: ${(message as InternalMessage).type}` }
+      throw new Error(`Unknown message type: ${(message as InternalMessage).type}`)
   }
 }
 
