@@ -2,12 +2,18 @@
 
 import type { TierName } from "../../../src/types";
 
-interface WalletState {
+// ---------------------------------------------------------------------------
+// Popup state — composed from wallet + x402 controllers
+// ---------------------------------------------------------------------------
+
+interface PopupState {
+  // Wallet concerns
   isSetUp: boolean;
   isUnlocked: boolean;
   network: string;
-  tier: TierName;
   balance?: number;
+  // x402 concerns
+  tier: TierName;
   limits?: {
     perTxMaxSatoshis: number;
     windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }>;
@@ -17,16 +23,16 @@ interface WalletState {
 const $ = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
-function updateUI(state: WalletState): void {
+// ---------------------------------------------------------------------------
+// Wallet panel UI (only when built-in backend is active)
+// ---------------------------------------------------------------------------
+
+function updateWalletPanel(state: PopupState): void {
   const statusEl = $<HTMLSpanElement>("status-indicator");
   const balanceEl = $<HTMLSpanElement>("balance-display");
-  const currentTierEl = $<HTMLSpanElement>("current-tier");
-  const tierSelect = $<HTMLSelectElement>("tier-select");
   const lockBtn = $<HTMLButtonElement>("lock-btn");
   const setupContainer = $<HTMLDivElement>("setup-container");
-  const limitsEl = $<HTMLDivElement>("limits-summary");
 
-  // Not set up — show setup prompt, hide everything else
   if (!state.isSetUp) {
     setupContainer.hidden = false;
     lockBtn.style.display = "none";
@@ -36,7 +42,6 @@ function updateUI(state: WalletState): void {
   setupContainer.hidden = true;
   lockBtn.style.display = "";
 
-  // Lock / unlock status
   if (state.isUnlocked) {
     statusEl.textContent = "Unlocked";
     statusEl.className = "status unlocked";
@@ -49,15 +54,22 @@ function updateUI(state: WalletState): void {
     lockBtn.className = "lock-btn locked";
   }
 
-  // Balance
   balanceEl.textContent =
     state.balance !== undefined ? `${state.balance.toLocaleString()} sats` : "--- sats";
+}
 
-  // Tier
+// ---------------------------------------------------------------------------
+// x402 panel UI (always shown)
+// ---------------------------------------------------------------------------
+
+function updateX402Panel(state: PopupState): void {
+  const currentTierEl = $<HTMLSpanElement>("current-tier");
+  const tierSelect = $<HTMLSelectElement>("tier-select");
+  const limitsEl = $<HTMLDivElement>("limits-summary");
+
   currentTierEl.textContent = state.tier;
   tierSelect.value = state.tier;
 
-  // Limits summary
   if (state.limits) {
     const lines = state.limits.windows.map(
       (w) => `${w.window}: ${w.maxSatoshis.toLocaleString()} sats / ${w.maxTransactions} txs`
@@ -69,25 +81,50 @@ function updateUI(state: WalletState): void {
   }
 }
 
-function sendMessage(msg: Record<string, unknown>): Promise<WalletState> {
-  return new Promise<WalletState>((resolve, reject) => {
+// ---------------------------------------------------------------------------
+// Message helper
+// ---------------------------------------------------------------------------
+
+function sendMessage(msg: Record<string, unknown>): Promise<PopupState> {
+  return new Promise<PopupState>((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      resolve(response as WalletState);
+      resolve(response as PopupState);
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Initialisation
+// ---------------------------------------------------------------------------
+
 document.addEventListener("DOMContentLoaded", async () => {
+  const walletPanel = $<HTMLDivElement>("wallet-panel");
+
+  // Check if wallet backend has its own UI — hide wallet panel if so
+  try {
+    const result = await chrome.storage.local.get("x402_wallet_backend");
+    const backendConfig = result.x402_wallet_backend as { type: string } | undefined;
+    if (backendConfig?.type === "external") {
+      walletPanel.style.display = "none";
+    }
+  } catch {
+    // Default: show wallet panel
+  }
+
   // Fetch initial state
+  function updateUI(state: PopupState): void {
+    updateWalletPanel(state);
+    updateX402Panel(state);
+  }
+
   try {
     const state = await sendMessage({ type: "getState" });
     updateUI(state);
   } catch {
-    // Background not ready — show setup
     updateUI({
       isSetUp: false,
       isUnlocked: false,
@@ -96,7 +133,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Lock / Unlock
+  // Wallet: Lock / Unlock
   $<HTMLButtonElement>("lock-btn").addEventListener("click", async () => {
     const statusEl = $<HTMLSpanElement>("status-indicator");
     const isCurrentlyUnlocked = statusEl.classList.contains("unlocked");
@@ -116,7 +153,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Tier change
+  // x402: Tier change
   $<HTMLSelectElement>("tier-select").addEventListener("change", async (e) => {
     const tier = (e.target as HTMLSelectElement).value as TierName;
     try {
@@ -127,9 +164,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Set up wallet
+  // Wallet: Set up
   $<HTMLButtonElement>("setup-btn").addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("ui/setup.html") });
+    chrome.tabs.create({ url: chrome.runtime.getURL("ui/wallet/setup.html") });
   });
 
   // Settings

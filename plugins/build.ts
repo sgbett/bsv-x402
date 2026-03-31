@@ -38,11 +38,16 @@ function buildTarget(target: Target) {
   // Bundle page-script.ts (runs in page context, must be IIFE)
   execSync(`npx tsup ${join(SHARED, 'page-script.ts')} --out-dir ${outDir} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
 
-  // Bundle UI scripts
-  for (const uiScript of ['popup.ts', 'setup.ts', 'approve.ts']) {
-    const scriptPath = join(SHARED, 'ui', uiScript)
-    if (existsSync(scriptPath)) {
-      execSync(`npx tsup ${scriptPath} --out-dir ${join(outDir, 'ui')} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
+  // Bundle UI scripts — shell popup at ui/, wallet and x402 panels in subdirs
+  const uiScripts = [
+    { src: join(SHARED, 'ui', 'popup.ts'), outDir: join(outDir, 'ui') },
+    { src: join(SHARED, 'ui', 'wallet', 'setup.ts'), outDir: join(outDir, 'ui', 'wallet') },
+    { src: join(SHARED, 'ui', 'x402', 'approve.ts'), outDir: join(outDir, 'ui', 'x402') },
+  ]
+  for (const { src, outDir: scriptOutDir } of uiScripts) {
+    if (existsSync(src)) {
+      mkdirSync(scriptOutDir, { recursive: true })
+      execSync(`npx tsup ${src} --out-dir ${scriptOutDir} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
     }
   }
 
@@ -50,10 +55,16 @@ function buildTarget(target: Target) {
   cpSync(join(PLUGINS, target, 'manifest.json'), join(outDir, 'manifest.json'))
 
   // Copy UI HTML/CSS files
-  for (const file of ['popup.html', 'popup.css', 'setup.html', 'approve.html']) {
-    const src = join(SHARED, 'ui', file)
+  const uiFiles = [
+    { src: join(SHARED, 'ui', 'popup.html'), dest: join(outDir, 'ui', 'popup.html') },
+    { src: join(SHARED, 'ui', 'popup.css'), dest: join(outDir, 'ui', 'popup.css') },
+    { src: join(SHARED, 'ui', 'wallet', 'setup.html'), dest: join(outDir, 'ui', 'wallet', 'setup.html') },
+    { src: join(SHARED, 'ui', 'x402', 'approve.html'), dest: join(outDir, 'ui', 'x402', 'approve.html') },
+  ]
+  for (const { src, dest } of uiFiles) {
     if (existsSync(src)) {
-      cpSync(src, join(outDir, 'ui', file))
+      mkdirSync(join(dest, '..'), { recursive: true })
+      cpSync(src, dest)
     }
   }
 
@@ -65,7 +76,7 @@ function buildTarget(target: Target) {
 
   // Rename .mjs outputs to .js for extension compatibility
   // tsup ESM outputs .mjs, but manifests reference .js
-  for (const dir of [outDir, join(outDir, 'ui')]) {
+  for (const dir of [outDir, join(outDir, 'ui'), join(outDir, 'ui', 'wallet'), join(outDir, 'ui', 'x402')]) {
     if (!existsSync(dir)) continue
     for (const file of readdirSync(dir)) {
       if (file.endsWith('.mjs')) {

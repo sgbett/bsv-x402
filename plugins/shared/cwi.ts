@@ -321,10 +321,10 @@ async function handleGetVersion(
 // Dispatch table
 // ---------------------------------------------------------------------------
 
-type MethodHandler = (params: unknown, context: CWIHandlerContext) => Promise<unknown>;
-type ContextOnlyHandler = (context: CWIHandlerContext) => Promise<unknown>;
+export type MethodHandler = (params: unknown, context: CWIHandlerContext) => Promise<unknown>;
+export type ContextOnlyHandler = (context: CWIHandlerContext) => Promise<unknown>;
 
-const methodHandlers: Record<CWIMethodName, MethodHandler | ContextOnlyHandler> = {
+export const methodHandlers: Record<CWIMethodName, MethodHandler | ContextOnlyHandler> = {
   // Key management
   getPublicKey: handleGetPublicKey,
   revealCounterpartyKeyLinkage: handleRevealCounterpartyKeyLinkage,
@@ -364,12 +364,17 @@ const methodHandlers: Record<CWIMethodName, MethodHandler | ContextOnlyHandler> 
 };
 
 // Methods that only need the context (no params from the caller)
-const contextOnlyMethods: Set<CWIMethodName> = new Set([
+export const contextOnlyMethods: Set<CWIMethodName> = new Set([
   'isAuthenticated',
   'waitForAuthentication',
   'getHeight',
   'getNetwork',
   'getVersion',
+]);
+
+// Methods that work even when the wallet is locked
+export const allowedWhileLocked: Set<CWIMethodName> = new Set([
+  'isAuthenticated', 'waitForAuthentication', 'getVersion', 'getNetwork',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -381,11 +386,6 @@ export async function handleCWIRequest(
   context: CWIHandlerContext,
 ): Promise<CWIResponse> {
   const { request, origin: _origin } = message;
-
-  // Methods that work even when the wallet is locked
-  const allowedWhileLocked: Set<CWIMethodName> = new Set([
-    'isAuthenticated', 'waitForAuthentication', 'getVersion', 'getNetwork',
-  ]);
 
   try {
     if (!context.isUnlocked() && !allowedWhileLocked.has(request.method)) {
