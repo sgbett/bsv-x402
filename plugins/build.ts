@@ -14,11 +14,15 @@ type Target = 'chromium' | 'firefox' | 'safari'
 const ALL_TARGETS: Target[] = ['chromium', 'firefox', 'safari']
 
 // Parse --target flag
-const targetArg = process.argv.find(a => a.startsWith('--target'))
-const targetValue = targetArg?.includes('=')
-  ? targetArg.split('=')[1]
-  : process.argv[process.argv.indexOf('--target') + 1]
-const targets: Target[] = targetValue
+const targetIdx = process.argv.indexOf('--target')
+let targetValue: string | undefined
+if (targetIdx !== -1 && targetIdx + 1 < process.argv.length) {
+  targetValue = process.argv[targetIdx + 1]
+} else {
+  const eqArg = process.argv.find(a => a.startsWith('--target='))
+  targetValue = eqArg?.split('=')[1]
+}
+const targets: Target[] = targetValue && ALL_TARGETS.includes(targetValue as Target)
   ? [targetValue as Target]
   : ALL_TARGETS
 
