@@ -39,9 +39,10 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       wallet.lock()
       break
     case 'setup': {
-      const payload = message.payload as { seed: string; password: string } | undefined
+      const payload = message.payload as { seed: string; password: string; tier?: import('../../src/types').TierName } | undefined
       if (!payload?.password || !payload?.seed) throw new Error('Seed and password required')
       await wallet.setup(payload.seed, payload.password)
+      if (payload.tier) x402.setTier(payload.tier)
       break
     }
     case 'setNetwork': {

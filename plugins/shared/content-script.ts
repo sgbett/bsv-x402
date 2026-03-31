@@ -79,12 +79,15 @@ function fetchAndUpdateIndicator(): void {
   });
 }
 
-// Mount indicator once DOM is ready
+// Mount indicator once DOM is ready; only poll when visible
 function mountIndicator(): void {
   chrome.storage.local.get('x402_indicator_mode', (result) => {
     const mode = (result.x402_indicator_mode as IndicatorMode) ?? 'bar';
     indicator.mount(mode);
-    fetchAndUpdateIndicator();
+    if (mode !== 'hidden') {
+      fetchAndUpdateIndicator();
+      setInterval(fetchAndUpdateIndicator, 3000);
+    }
   });
 }
 
@@ -93,9 +96,6 @@ if (document.readyState === 'loading') {
 } else {
   mountIndicator();
 }
-
-// Poll for spend status updates (window rollover, etc.)
-setInterval(fetchAndUpdateIndicator, 3000);
 
 // Listen for push updates from background after payments
 chrome.runtime.onMessage.addListener((message) => {

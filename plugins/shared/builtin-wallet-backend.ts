@@ -61,7 +61,7 @@ export class BuiltInWalletBackend implements WalletBackend {
     if (!this.wallet) {
       if (method === 'isAuthenticated') return { authenticated: false }
       if (method === 'getVersion') return { version: 'bsv-x402 0.1.0 (wallet-toolbox)' }
-      if (method === 'getNetwork') return { network: this.chain }
+      if (method === 'getNetwork') return { network: this.chain === 'main' ? 'mainnet' : 'testnet' }
       if (method === 'waitForAuthentication') return { authenticated: false }
       throw new Error('Wallet is not initialised')
     }
