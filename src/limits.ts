@@ -241,6 +241,11 @@ export class RateLimiter {
       return { action: "block", reason: "Circuit breaker tripped — call resetLimits() to clear", severity: "trip" }
     }
 
+    // Reject negative amounts — defence in depth against upstream bypass
+    if (challenge.amount < 0) {
+      return { action: "block", reason: "Negative transaction amount rejected", severity: "reject" }
+    }
+
     // BFG per-tx ceiling — unconditional
     if (challenge.amount > BFG_PER_TX_CEILING_SATOSHIS) {
       return { action: "block", reason: `Exceeds BFG per-tx ceiling (${BFG_PER_TX_CEILING_SATOSHIS} sats)`, severity: "reject" }

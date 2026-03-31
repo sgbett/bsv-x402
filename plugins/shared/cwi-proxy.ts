@@ -21,14 +21,25 @@ export async function handleCWIRequest(
 
   try {
     // Spending limits check — only on createAction (the method that commits satoshis)
+    let validatedSatoshis: number | undefined
     if (request.method === 'createAction') {
-      const params = request.params as { outputs?: Array<{ satoshis: number }> } | undefined
-      const totalSatoshis = (params?.outputs ?? []).reduce((sum, o) => sum + (o.satoshis ?? 0), 0)
+      const params = request.params as { outputs?: Array<{ satoshis: unknown }> } | undefined
+      const outputs = params?.outputs ?? []
+
+      // Validate each output's satoshis — reject negative, non-integer, or non-numeric values
+      let total = 0
+      for (const o of outputs) {
+        if (typeof o.satoshis !== 'number' || !Number.isFinite(o.satoshis) || !Number.isInteger(o.satoshis) || o.satoshis < 0) {
+          return { id: request.id, status: 'error', error: 'Invalid satoshis value in outputs' }
+        }
+        total += o.satoshis
+      }
+      validatedSatoshis = total
 
       const challenge: Challenge = {
         nonce: request.id,
         payee: '',
-        amount: totalSatoshis,
+        amount: validatedSatoshis,
         network: 'main',
       }
 
@@ -41,13 +52,11 @@ export async function handleCWIRequest(
     // Delegate to wallet backend
     const result = await backend.call(request.method, request.params, origin)
 
-    // Record payment on successful createAction
-    if (request.method === 'createAction' && result != null) {
+    // Record payment on successful createAction — reuse the validated total
+    if (request.method === 'createAction' && result != null && validatedSatoshis !== undefined) {
       const actionResult = result as { txid?: string }
       if (actionResult.txid) {
-        const params = request.params as { outputs?: Array<{ satoshis: number }> } | undefined
-        const totalSatoshis = (params?.outputs ?? []).reduce((sum, o) => sum + (o.satoshis ?? 0), 0)
-        await recordPayment(origin, totalSatoshis, actionResult.txid)
+        await recordPayment(origin, validatedSatoshis, actionResult.txid)
 
         // Push spend update to the originating tab's indicator
         if (senderTabId !== undefined) {
