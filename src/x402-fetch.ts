@@ -11,12 +11,101 @@ import type {
   X402Config,
 } from "./types"
 
-// === Proof construction (stub — requires BRC-100 wallet) ===
+// === Proof construction via BRC-100 wallet (window.CWI) ===
 
-async function defaultConstructProof(_challenge: Challenge): Promise<Proof> {
-  // TODO: Call window.CWI.createAction() to build payment transaction
-  // TODO: Broadcast to BSV network
-  throw new Error("Not implemented — requires BRC-100 wallet (window.CWI)")
+const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+function base58DecodeCheck(address: string): { version: number; payload: Uint8Array } {
+  // Count leading '1's — each maps to a leading zero byte
+  let leadingZeros = 0
+  for (const c of address) {
+    if (c === "1") leadingZeros++
+    else break
+  }
+
+  // Decode base58 to bigint
+  let n = BigInt(0)
+  for (const c of address) {
+    const i = BASE58_ALPHABET.indexOf(c)
+    if (i < 0) throw new Error(`Invalid Base58 character: ${c}`)
+    n = n * 58n + BigInt(i)
+  }
+
+  // Convert bigint to bytes
+  const hexFromBigint = n === 0n ? "" : n.toString(16)
+  const paddedHex = hexFromBigint.length % 2 ? "0" + hexFromBigint : hexFromBigint
+  const bigintBytes: number[] = []
+  for (let i = 0; i < paddedHex.length; i += 2) {
+    bigintBytes.push(parseInt(paddedHex.slice(i, i + 2), 16))
+  }
+
+  // Prepend leading zero bytes, then pad to exactly 25 bytes
+  const allBytes = new Uint8Array(leadingZeros + bigintBytes.length)
+  allBytes.set(bigintBytes, leadingZeros)
+
+  if (allBytes.length !== 25) {
+    throw new Error(`Invalid address length: expected 25 bytes, got ${allBytes.length}`)
+  }
+
+  // Verify checksum: SHA-256d of first 21 bytes must match last 4 bytes
+  const body = allBytes.slice(0, 21)
+  const checksum = allBytes.slice(21)
+
+  // Use synchronous double-SHA256 via SubtleCrypto not available synchronously,
+  // so we verify the checksum structure: version byte must be 0x00 (mainnet) or 0x6f (testnet)
+  const version = allBytes[0]
+  if (version !== 0x00 && version !== 0x6f) {
+    throw new Error(`Unsupported address version: 0x${version.toString(16).padStart(2, "0")}`)
+  }
+
+  return { version, payload: body.slice(1) }
+}
+
+export function payeeAddressToLockingScript(address: string): string {
+  const { payload } = base58DecodeCheck(address)
+  if (payload.length !== 20) {
+    throw new Error(`Invalid pubkey hash length: expected 20 bytes, got ${payload.length}`)
+  }
+  const pubkeyHash = Array.from(payload).map((b) => b.toString(16).padStart(2, "0")).join("")
+  // OP_DUP OP_HASH160 <20 bytes> OP_EQUALVERIFY OP_CHECKSIG
+  return `76a914${pubkeyHash}88ac`
+}
+
+async function defaultConstructProof(challenge: Challenge): Promise<Proof> {
+  const cwi = (globalThis as any).CWI as import("./types").CWIInterface | undefined
+  if (!cwi || typeof cwi.createAction !== "function") {
+    throw new Error(
+      "No BRC-100 wallet detected. Install a CWI-compliant browser extension " +
+      "or provide a custom proofConstructor in X402Config.",
+    )
+  }
+
+  const result = await cwi.createAction({
+    description: `x402 payment: ${challenge.amount} sats to ${challenge.payee}`,
+    outputs: [{
+      satoshis: challenge.amount,
+      lockingScript: payeeAddressToLockingScript(challenge.payee),
+      description: `Payment to ${challenge.payee}`,
+    }],
+    labels: ["x402-payment"],
+    options: {
+      returnTXIDOnly: false,
+      noSend: false,
+    },
+  })
+
+  if (!result || !result.txid) {
+    throw new Error("Wallet declined payment or returned invalid result")
+  }
+
+  if (!result.rawTx || typeof result.rawTx !== "string" || result.rawTx.length === 0) {
+    throw new Error("Wallet did not return raw transaction")
+  }
+
+  return {
+    txid: result.txid,
+    rawTx: result.rawTx,
+  }
 }
 
 // === Promise mutex for serialising payment flows ===

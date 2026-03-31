@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createX402Fetch } from "./x402-fetch"
+import { createX402Fetch, payeeAddressToLockingScript } from "./x402-fetch"
 import type { LimitState, SitePolicy, StorageAdapter } from "./types"
 
 const NOW = 1_700_000_000_000
@@ -317,5 +317,42 @@ describe("createX402Fetch", () => {
       const res = await f("https://api.example.com/cheap")
       expect(res.status).toBe(200)
     })
+  })
+})
+
+describe("payeeAddressToLockingScript", () => {
+  it("decodes a valid mainnet P2PKH address", () => {
+    // 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa (Satoshi's address on BTC, version 0x00)
+    const script = payeeAddressToLockingScript("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa")
+    expect(script).toMatch(/^76a914[0-9a-f]{40}88ac$/)
+    expect(script).toBe("76a91462e907b15cbf27d5425399ebf6f0fb50ebb88f1888ac")
+  })
+
+  it("decodes a valid testnet P2PKH address", () => {
+    // mfWxJ45yp2SFn7UciZyNpvDKrzbi36LaVX (testnet, version 0x6f)
+    const script = payeeAddressToLockingScript("mfWxJ45yp2SFn7UciZyNpvDKrzbi36LaVX")
+    expect(script).toMatch(/^76a914[0-9a-f]{40}88ac$/)
+  })
+
+  it("handles addresses with leading 1s (zero bytes)", () => {
+    // 1111111111111111111114oLvT2 is a valid address (all-zero pubkey hash)
+    const script = payeeAddressToLockingScript("1111111111111111111114oLvT2")
+    expect(script).toBe("76a914000000000000000000000000000000000000000088ac")
+  })
+
+  it("rejects invalid Base58 characters", () => {
+    expect(() => payeeAddressToLockingScript("1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf0O"))
+      .toThrow("Invalid Base58 character")
+  })
+
+  it("rejects address with wrong length", () => {
+    expect(() => payeeAddressToLockingScript("1234"))
+      .toThrow()
+  })
+
+  it("rejects unsupported version byte", () => {
+    // 3-prefixed addresses are P2SH (version 0x05), not P2PKH
+    expect(() => payeeAddressToLockingScript("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"))
+      .toThrow("Unsupported address version")
   })
 })

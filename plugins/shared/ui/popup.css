@@ -1,0 +1,115 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  width: 400px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #e0e0e0;
+  font-size: 14px;
+}
+
+.popup { padding: 16px; }
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #2a2a4a;
+}
+
+h1 { font-size: 16px; font-weight: 600; color: #fff; }
+
+.status {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-weight: 500;
+}
+.status.locked { background: #3a2020; color: #f06060; }
+.status.unlocked { background: #1a3a2a; color: #00d4aa; }
+
+section { margin-bottom: 14px; }
+
+label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #888;
+  margin-bottom: 4px;
+}
+
+.balance span, #balance-display {
+  font-size: 20px;
+  font-weight: 700;
+  color: #00d4aa;
+}
+
+.tier-name {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: #ccc;
+}
+
+#tier-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+#tier-select:focus { border-color: #00d4aa; }
+
+.limits-summary {
+  font-size: 13px;
+  color: #999;
+  padding: 8px;
+  background: #16213e;
+  border-radius: 6px;
+}
+
+.actions { margin: 16px 0 12px; }
+
+.lock-btn {
+  width: 100%;
+  padding: 10px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.lock-btn:hover { opacity: 0.85; }
+.lock-btn.locked { background: #00d4aa; color: #1a1a2e; }
+.lock-btn.unlocked { background: #e04050; color: #fff; }
+
+.setup-container { margin: 12px 0; }
+
+.setup-btn {
+  width: 100%;
+  padding: 10px;
+  background: #00d4aa;
+  color: #1a1a2e;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.setup-btn:hover { opacity: 0.85; }
+
+footer {
+  text-align: center;
+  padding-top: 8px;
+  border-top: 1px solid #2a2a4a;
+}
+footer a { color: #00d4aa; text-decoration: none; font-size: 12px; }
+footer a:hover { text-decoration: underline; }

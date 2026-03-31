@@ -20,6 +20,11 @@
     "build": "tsup",
     "test": "vitest",
     "typecheck": "tsc --noEmit",
+    "build:plugins": "tsx plugins/build.ts",
+    "build:chromium": "tsx plugins/build.ts --target chromium",
+    "build:firefox": "tsx plugins/build.ts --target firefox",
+    "build:safari": "tsx plugins/build.ts --target safari",
+    "build:all": "npm run build && npm run build:plugins",
     "demo": "npm run build && tsx demo/server.ts"
   },
   "repository": {
@@ -27,6 +32,7 @@
     "url": "https://github.com/sgbett/bsv-x402.git"
   },
   "devDependencies": {
+    "@types/chrome": "^0.1.38",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
     "tsup": "^8.0.0",
