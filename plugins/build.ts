@@ -70,7 +70,7 @@ function buildTarget(target: Target) {
   ]
   for (const { src, dest } of uiFiles) {
     if (existsSync(src)) {
-      mkdirSync(join(dest, '..'), { recursive: true })
+      mkdirSync(dirname(dest), { recursive: true })
       cpSync(src, dest)
     }
   }

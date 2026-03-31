@@ -32,7 +32,7 @@ const WALLET_METHODS = new Set<CWIMethodName>([
 
 export class BuiltInWalletBackend implements WalletBackend {
   private wallet: WalletInterface | null = null
-  private chain: 'main' | 'test' = 'test'
+  private chain: 'main' | 'test' = 'main'
 
   /**
    * Initialise the wallet from a root private key (hex).

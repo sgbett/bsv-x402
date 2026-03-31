@@ -143,7 +143,7 @@ function makeMessage(method: CWIMethodName, params: unknown = {}): ContentToBack
 vi.mock('./x402-controller', () => ({
   checkSpendLimits: vi.fn().mockResolvedValue({ allowed: true }),
   recordPayment: vi.fn().mockResolvedValue(undefined),
-  getSpendStatus: vi.fn().mockResolvedValue({ dailySpent: 0, windowSpent: 0 }),
+  getSpendStatus: vi.fn().mockResolvedValue({ spent: 0, limit: 0, window: 'day', percentage: 0, circuitBroken: false }),
 }))
 
 // Import the mocked functions so we can inspect/reset them

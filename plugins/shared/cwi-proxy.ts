@@ -65,7 +65,10 @@ export async function handleCWIRequest(
         // Push spend update to the originating tab's indicator
         if (senderTabId !== undefined) {
           getSpendStatus().then((status) => {
-            chrome.tabs.sendMessage(senderTabId, { type: 'spendUpdated', status }).catch(() => {})
+            chrome.tabs.sendMessage(senderTabId, { type: 'spendUpdated', status }, () => {
+              // Best-effort update — suppress unchecked lastError warnings
+              void chrome.runtime?.lastError
+            })
           }).catch(() => {})
         }
       }
