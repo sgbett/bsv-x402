@@ -1,24 +1,22 @@
 /**
  * BSV Browser CWI Conformance Tests
  *
- * These tests verify that our CWI implementation exposes the same interface
- * as the BSV Browser (bsv-blockchain/bsv-browser) and the canonical BRC-100
- * wallet specification (bsv-blockchain/ts-sdk Wallet.interfaces.ts).
+ * These tests verify that the CWI proxy routes all 28 BRC-100 wallet methods
+ * through the WalletBackend interface, applies spending limits on createAction,
+ * and rejects unknown methods.
  *
  * Reference: BSV Browser handles CWI calls in app/browser.tsx via a message
  * handler that forwards `{ call, args, id }` messages to the wallet object.
  * The wallet implements all 28 BRC-100 WalletInterface methods.
- *
- * These tests should be kept in sync with BSV Browser's interface. If new
- * methods are added upstream, they must be added here and to our implementation.
  *
  * SYNC REFERENCE:
  *   - bsv-blockchain/bsv-browser  app/browser.tsx  (handleMessage wallet methods)
  *   - bsv-blockchain/ts-sdk       src/wallet/Wallet.interfaces.ts
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
-import { handleCWIRequest, type CWIHandlerContext } from './cwi'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { handleCWIRequest } from './cwi-proxy'
+import type { WalletBackend } from './wallet-backend'
 import type { ContentToBackgroundMessage, CWIMethodName } from './messages'
 
 // ---------------------------------------------------------------------------
@@ -66,18 +64,70 @@ const BSV_BROWSER_METHODS: CWIMethodName[] = [
 ]
 
 // ---------------------------------------------------------------------------
-// Test context (unlocked wallet)
+// Mock wallet backend
 // ---------------------------------------------------------------------------
 
-let context: CWIHandlerContext
+interface CallRecord {
+  method: CWIMethodName
+  params: unknown
+  origin: string
+}
 
-beforeEach(() => {
-  context = {
-    getSeed: () => 'test-seed-conformance',
-    isUnlocked: () => true,
-    getNetwork: () => 'main',
+function createMockBackend(): WalletBackend & { calls: CallRecord[] } {
+  const calls: CallRecord[] = []
+
+  return {
+    calls,
+
+    async call(method: CWIMethodName, params: unknown, origin: string): Promise<unknown> {
+      calls.push({ method, params, origin })
+
+      // Return stub responses shaped like the real wallet would return
+      switch (method) {
+        case 'getPublicKey': return { publicKey: '02abc' }
+        case 'revealCounterpartyKeyLinkage': return { encryptedLinkage: 'aaa', encryptedLinkageProof: 'bbb' }
+        case 'revealSpecificKeyLinkage': return { encryptedLinkage: 'aaa', encryptedLinkageProof: 'bbb' }
+        case 'encrypt': return { ciphertext: [1, 2, 3] }
+        case 'decrypt': return { plaintext: [1, 2, 3] }
+        case 'createHmac': return { hmac: [4, 5, 6] }
+        case 'verifyHmac': return { valid: true }
+        case 'createSignature': return { signature: [7, 8, 9] }
+        case 'verifySignature': return { valid: true }
+        case 'createAction': return { txid: 'deadbeef' }
+        case 'signAction': return { txid: 'deadbeef' }
+        case 'abortAction': return { aborted: true }
+        case 'listActions': return { totalActions: 0, actions: [] }
+        case 'internalizeAction': return { accepted: true }
+        case 'listOutputs': return { totalOutputs: 0, outputs: [] }
+        case 'relinquishOutput': return { relinquished: true }
+        case 'acquireCertificate': return { type: 'test', subject: 'sub', serialNumber: '1', certifier: 'c', fields: {}, signature: 'sig' }
+        case 'listCertificates': return { totalCertificates: 0, certificates: [] }
+        case 'proveCertificate': return { keyForVerifier: 'key' }
+        case 'relinquishCertificate': return { relinquished: true }
+        case 'discoverByIdentityKey': return { totalCertificates: 0, certificates: [] }
+        case 'discoverByAttributes': return { totalCertificates: 0, certificates: [] }
+        case 'isAuthenticated': return { authenticated: true }
+        case 'waitForAuthentication': return { authenticated: true }
+        case 'getHeight': return { height: 800000 }
+        case 'getHeaderForHeight': return { header: '0000' }
+        case 'getNetwork': return { network: 'mainnet' }
+        case 'getVersion': return { version: '1.0.0' }
+      }
+    },
+
+    async isAuthenticated(): Promise<boolean> {
+      return true
+    },
+
+    hasOwnUI(): boolean {
+      return false
+    },
   }
-})
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function makeMessage(method: CWIMethodName, params: unknown = {}): ContentToBackgroundMessage {
   return {
@@ -87,7 +137,33 @@ function makeMessage(method: CWIMethodName, params: unknown = {}): ContentToBack
 }
 
 // ---------------------------------------------------------------------------
-// 1. Interface completeness — every BSV Browser method is handled
+// Stub the x402-controller module so tests run without chrome.storage
+// ---------------------------------------------------------------------------
+
+vi.mock('./x402-controller', () => ({
+  checkSpendLimits: vi.fn().mockResolvedValue({ allowed: true }),
+  recordPayment: vi.fn().mockResolvedValue(undefined),
+  getSpendStatus: vi.fn().mockResolvedValue({ dailySpent: 0, windowSpent: 0 }),
+}))
+
+// Import the mocked functions so we can inspect/reset them
+import { checkSpendLimits, recordPayment } from './x402-controller'
+const mockCheckSpendLimits = vi.mocked(checkSpendLimits)
+const mockRecordPayment = vi.mocked(recordPayment)
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+let backend: ReturnType<typeof createMockBackend>
+
+beforeEach(() => {
+  backend = createMockBackend()
+  vi.clearAllMocks()
+})
+
+// ---------------------------------------------------------------------------
+// 1. Interface completeness — every BSV Browser method is routed via proxy
 // ---------------------------------------------------------------------------
 
 describe('CWI conformance: interface completeness', () => {
@@ -96,51 +172,46 @@ describe('CWI conformance: interface completeness', () => {
   })
 
   for (const method of BSV_BROWSER_METHODS) {
-    it(`handles "${method}" without returning "Unknown method" error`, async () => {
+    it(`routes "${method}" through the wallet backend`, async () => {
       const msg = makeMessage(method, getMinimalParams(method))
-      const response = await handleCWIRequest(msg, context)
+      const response = await handleCWIRequest(msg, backend)
       expect(response.status).toBe('ok')
       expect(response.error).toBeUndefined()
+
+      // Verify the backend was actually called with the correct method
+      const call = backend.calls.find(c => c.method === method)
+      expect(call).toBeDefined()
+      expect(call!.origin).toBe('https://example.com')
     })
   }
 })
 
 // ---------------------------------------------------------------------------
-// 2. Message format — matches BSV Browser's { call, args, id } → { type: 'CWI', id, result, status }
+// 2. Message format — response structure
 // ---------------------------------------------------------------------------
 
 describe('CWI conformance: message format', () => {
   it('response includes id matching request', async () => {
     const msg = makeMessage('getNetwork')
-    const response = await handleCWIRequest(msg, context)
+    const response = await handleCWIRequest(msg, backend)
     expect(response.id).toBe('test-getNetwork')
   })
 
   it('successful response has status "ok" and result', async () => {
     const msg = makeMessage('getNetwork')
-    const response = await handleCWIRequest(msg, context)
+    const response = await handleCWIRequest(msg, backend)
     expect(response.status).toBe('ok')
     expect(response.result).toBeDefined()
   })
 
   it('error response has status "error" and error string', async () => {
-    // Missing required params for createAction
-    const msg = makeMessage('createAction', {})
-    const response = await handleCWIRequest(msg, context)
+    // Make the backend throw
+    backend.call = async () => { throw new Error('test failure') }
+    const msg = makeMessage('getNetwork')
+    const response = await handleCWIRequest(msg, backend)
     expect(response.status).toBe('error')
     expect(response.error).toBeDefined()
     expect(typeof response.error).toBe('string')
-  })
-
-  it('locked wallet returns error for all methods except isAuthenticated pattern', async () => {
-    const lockedContext: CWIHandlerContext = {
-      ...context,
-      isUnlocked: () => false,
-    }
-    const msg = makeMessage('createAction', { outputs: [] })
-    const response = await handleCWIRequest(msg, lockedContext)
-    expect(response.status).toBe('error')
-    expect(response.error).toContain('locked')
   })
 })
 
@@ -151,14 +222,14 @@ describe('CWI conformance: message format', () => {
 describe('CWI conformance: response shapes', () => {
   // Key management
   it('getPublicKey returns { publicKey }', async () => {
-    const r = await handleCWIRequest(makeMessage('getPublicKey'), context)
+    const r = await handleCWIRequest(makeMessage('getPublicKey'), backend)
     expect(r.result).toHaveProperty('publicKey')
   })
 
   it('revealCounterpartyKeyLinkage returns { encryptedLinkage, encryptedLinkageProof }', async () => {
     const r = await handleCWIRequest(makeMessage('revealCounterpartyKeyLinkage', {
       counterparty: 'abc', verifier: 'def', protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('encryptedLinkage')
     expect(r.result).toHaveProperty('encryptedLinkageProof')
   })
@@ -166,7 +237,7 @@ describe('CWI conformance: response shapes', () => {
   it('revealSpecificKeyLinkage returns { encryptedLinkage, encryptedLinkageProof }', async () => {
     const r = await handleCWIRequest(makeMessage('revealSpecificKeyLinkage', {
       counterparty: 'abc', verifier: 'def', protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('encryptedLinkage')
     expect(r.result).toHaveProperty('encryptedLinkageProof')
   })
@@ -175,42 +246,42 @@ describe('CWI conformance: response shapes', () => {
   it('encrypt returns { ciphertext }', async () => {
     const r = await handleCWIRequest(makeMessage('encrypt', {
       plaintext: [1, 2, 3], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('ciphertext')
   })
 
   it('decrypt returns { plaintext }', async () => {
     const r = await handleCWIRequest(makeMessage('decrypt', {
       ciphertext: [1, 2, 3], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('plaintext')
   })
 
   it('createHmac returns { hmac }', async () => {
     const r = await handleCWIRequest(makeMessage('createHmac', {
       data: [1, 2, 3], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('hmac')
   })
 
   it('verifyHmac returns { valid }', async () => {
     const r = await handleCWIRequest(makeMessage('verifyHmac', {
       data: [1, 2, 3], hmac: [4, 5, 6], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('valid')
   })
 
   it('createSignature returns { signature }', async () => {
     const r = await handleCWIRequest(makeMessage('createSignature', {
       data: [1, 2, 3], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('signature')
   })
 
   it('verifySignature returns { valid }', async () => {
     const r = await handleCWIRequest(makeMessage('verifySignature', {
       data: [1, 2, 3], signature: [4, 5, 6], protocolID: [1, 'test'], keyID: '1',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('valid')
   })
 
@@ -219,46 +290,46 @@ describe('CWI conformance: response shapes', () => {
     const r = await handleCWIRequest(makeMessage('createAction', {
       description: 'test payment',
       outputs: [{ satoshis: 100, lockingScript: '76a914aabb88ac', outputDescription: 'test' }],
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('txid')
   })
 
   it('signAction returns { txid }', async () => {
-    const r = await handleCWIRequest(makeMessage('signAction', { reference: 'ref-123' }), context)
+    const r = await handleCWIRequest(makeMessage('signAction', { reference: 'ref-123' }), backend)
     expect(r.result).toHaveProperty('txid')
   })
 
   it('abortAction returns { aborted }', async () => {
-    const r = await handleCWIRequest(makeMessage('abortAction', { reference: 'ref-123' }), context)
+    const r = await handleCWIRequest(makeMessage('abortAction', { reference: 'ref-123' }), backend)
     expect(r.result).toHaveProperty('aborted')
   })
 
   it('listActions returns { totalActions, actions }', async () => {
-    const r = await handleCWIRequest(makeMessage('listActions', { labels: ['test'] }), context)
+    const r = await handleCWIRequest(makeMessage('listActions', { labels: ['test'] }), backend)
     expect(r.result).toHaveProperty('totalActions')
     expect(r.result).toHaveProperty('actions')
   })
 
   it('internalizeAction returns { accepted }', async () => {
-    const r = await handleCWIRequest(makeMessage('internalizeAction', { tx: [0], outputs: [] }), context)
+    const r = await handleCWIRequest(makeMessage('internalizeAction', { tx: [0], outputs: [] }), backend)
     expect(r.result).toHaveProperty('accepted')
   })
 
   // Output management
   it('listOutputs returns { totalOutputs, outputs }', async () => {
-    const r = await handleCWIRequest(makeMessage('listOutputs', { basket: 'default' }), context)
+    const r = await handleCWIRequest(makeMessage('listOutputs', { basket: 'default' }), backend)
     expect(r.result).toHaveProperty('totalOutputs')
     expect(r.result).toHaveProperty('outputs')
   })
 
   it('relinquishOutput returns { relinquished }', async () => {
-    const r = await handleCWIRequest(makeMessage('relinquishOutput', { basket: 'default', output: 'abc:0' }), context)
+    const r = await handleCWIRequest(makeMessage('relinquishOutput', { basket: 'default', output: 'abc:0' }), backend)
     expect(r.result).toHaveProperty('relinquished')
   })
 
   // Certificate management
   it('acquireCertificate returns { type, subject, serialNumber, certifier, fields, signature }', async () => {
-    const r = await handleCWIRequest(makeMessage('acquireCertificate', { type: 'test', certifier: 'abc' }), context)
+    const r = await handleCWIRequest(makeMessage('acquireCertificate', { type: 'test', certifier: 'abc' }), backend)
     const result = r.result as Record<string, unknown>
     expect(result).toHaveProperty('type')
     expect(result).toHaveProperty('subject')
@@ -269,7 +340,7 @@ describe('CWI conformance: response shapes', () => {
   })
 
   it('listCertificates returns { totalCertificates, certificates }', async () => {
-    const r = await handleCWIRequest(makeMessage('listCertificates', { certifiers: ['abc'], types: ['test'] }), context)
+    const r = await handleCWIRequest(makeMessage('listCertificates', { certifiers: ['abc'], types: ['test'] }), backend)
     expect(r.result).toHaveProperty('totalCertificates')
     expect(r.result).toHaveProperty('certificates')
   })
@@ -277,121 +348,165 @@ describe('CWI conformance: response shapes', () => {
   it('proveCertificate returns { keyForVerifier }', async () => {
     const r = await handleCWIRequest(makeMessage('proveCertificate', {
       certificate: {}, fieldsToReveal: ['name'], verifier: 'abc',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('keyForVerifier')
   })
 
   it('relinquishCertificate returns { relinquished }', async () => {
     const r = await handleCWIRequest(makeMessage('relinquishCertificate', {
       type: 'test', serialNumber: '123', certifier: 'abc',
-    }), context)
+    }), backend)
     expect(r.result).toHaveProperty('relinquished')
   })
 
   // Certificate discovery
   it('discoverByIdentityKey returns { totalCertificates, certificates }', async () => {
-    const r = await handleCWIRequest(makeMessage('discoverByIdentityKey', { identityKey: 'abc' }), context)
+    const r = await handleCWIRequest(makeMessage('discoverByIdentityKey', { identityKey: 'abc' }), backend)
     expect(r.result).toHaveProperty('totalCertificates')
     expect(r.result).toHaveProperty('certificates')
   })
 
   it('discoverByAttributes returns { totalCertificates, certificates }', async () => {
-    const r = await handleCWIRequest(makeMessage('discoverByAttributes', { attributes: { name: 'test' } }), context)
+    const r = await handleCWIRequest(makeMessage('discoverByAttributes', { attributes: { name: 'test' } }), backend)
     expect(r.result).toHaveProperty('totalCertificates')
     expect(r.result).toHaveProperty('certificates')
   })
 
   // Authentication & status
   it('isAuthenticated returns { authenticated }', async () => {
-    const r = await handleCWIRequest(makeMessage('isAuthenticated'), context)
+    const r = await handleCWIRequest(makeMessage('isAuthenticated'), backend)
     expect(r.result).toHaveProperty('authenticated')
     expect((r.result as { authenticated: boolean }).authenticated).toBe(true)
   })
 
   it('waitForAuthentication returns { authenticated }', async () => {
-    const r = await handleCWIRequest(makeMessage('waitForAuthentication'), context)
+    const r = await handleCWIRequest(makeMessage('waitForAuthentication'), backend)
     expect(r.result).toHaveProperty('authenticated')
   })
 
   // Blockchain information
   it('getHeight returns { height }', async () => {
-    const r = await handleCWIRequest(makeMessage('getHeight'), context)
+    const r = await handleCWIRequest(makeMessage('getHeight'), backend)
     expect(r.result).toHaveProperty('height')
   })
 
   it('getHeaderForHeight returns { header }', async () => {
-    const r = await handleCWIRequest(makeMessage('getHeaderForHeight', { height: 1 }), context)
+    const r = await handleCWIRequest(makeMessage('getHeaderForHeight', { height: 1 }), backend)
     expect(r.result).toHaveProperty('header')
   })
 
-  it('getNetwork returns { network } with "mainnet" or "testnet"', async () => {
-    const r = await handleCWIRequest(makeMessage('getNetwork'), context)
-    const result = r.result as { network: string }
-    expect(result).toHaveProperty('network')
-    expect(['mainnet', 'testnet']).toContain(result.network)
+  it('getNetwork returns { network }', async () => {
+    const r = await handleCWIRequest(makeMessage('getNetwork'), backend)
+    expect(r.result).toHaveProperty('network')
   })
 
   it('getVersion returns { version }', async () => {
-    const r = await handleCWIRequest(makeMessage('getVersion'), context)
+    const r = await handleCWIRequest(makeMessage('getVersion'), backend)
     expect(r.result).toHaveProperty('version')
   })
 })
 
 // ---------------------------------------------------------------------------
-// 4. Parameter validation — methods reject missing required params
+// 4. Spending limits — createAction triggers limit checks
 // ---------------------------------------------------------------------------
 
-describe('CWI conformance: parameter validation', () => {
-  const methodsWithRequiredParams: Array<[CWIMethodName, string[]]> = [
-    ['createAction', ['outputs']],
-    ['signAction', ['reference']],
-    ['abortAction', ['reference']],
-    ['listActions', ['labels']],
-    ['internalizeAction', ['tx', 'outputs']],
-    ['listOutputs', ['basket']],
-    ['relinquishOutput', ['basket', 'output']],
-    ['acquireCertificate', ['type', 'certifier']],
-    ['listCertificates', ['certifiers', 'types']],
-    ['proveCertificate', ['certificate', 'fieldsToReveal', 'verifier']],
-    ['relinquishCertificate', ['type', 'serialNumber', 'certifier']],
-    ['discoverByIdentityKey', ['identityKey']],
-    ['discoverByAttributes', ['attributes']],
-    ['getHeaderForHeight', ['height']],
-    ['encrypt', ['plaintext', 'protocolID', 'keyID']],
-    ['decrypt', ['ciphertext', 'protocolID', 'keyID']],
-    ['createHmac', ['data', 'protocolID', 'keyID']],
-    ['verifyHmac', ['data', 'hmac', 'protocolID', 'keyID']],
-    ['revealCounterpartyKeyLinkage', ['counterparty', 'verifier']],
-    ['revealSpecificKeyLinkage', ['counterparty', 'verifier', 'protocolID', 'keyID']],
-  ]
-
-  for (const [method, requiredKeys] of methodsWithRequiredParams) {
-    it(`${method} rejects empty params (requires: ${requiredKeys.join(', ')})`, async () => {
-      const msg = makeMessage(method, {})
-      const response = await handleCWIRequest(msg, context)
-      expect(response.status).toBe('error')
-      expect(response.error).toContain('Missing required parameter')
+describe('CWI conformance: spending limits', () => {
+  it('createAction checks spending limits before calling backend', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [{ satoshis: 500, lockingScript: '00', outputDescription: 'test' }],
     })
-  }
+    await handleCWIRequest(msg, backend)
+
+    expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
+    // Verify the challenge passed to checkSpendLimits has the correct amount
+    const challenge = mockCheckSpendLimits.mock.calls[0][0]
+    expect(challenge.amount).toBe(500)
+  })
+
+  it('createAction sums satoshis across multiple outputs', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [
+        { satoshis: 200, lockingScript: '00', outputDescription: 'a' },
+        { satoshis: 300, lockingScript: '01', outputDescription: 'b' },
+      ],
+    })
+    await handleCWIRequest(msg, backend)
+
+    const challenge = mockCheckSpendLimits.mock.calls[0][0]
+    expect(challenge.amount).toBe(500)
+  })
+
+  it('createAction is blocked when spending limit is exceeded', async () => {
+    mockCheckSpendLimits.mockResolvedValueOnce({ allowed: false, reason: 'Daily limit exceeded' })
+
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [{ satoshis: 999999, lockingScript: '00', outputDescription: 'test' }],
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('error')
+    expect(response.error).toContain('Daily limit exceeded')
+    // Backend should NOT have been called
+    expect(backend.calls).toHaveLength(0)
+  })
+
+  it('createAction records payment after successful backend call', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [{ satoshis: 100, lockingScript: '00', outputDescription: 'test' }],
+    })
+    await handleCWIRequest(msg, backend)
+
+    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 100, 'deadbeef')
+  })
+
+  it('non-createAction methods skip spending limits entirely', async () => {
+    const msg = makeMessage('getPublicKey')
+    await handleCWIRequest(msg, backend)
+
+    expect(mockCheckSpendLimits).not.toHaveBeenCalled()
+    expect(mockRecordPayment).not.toHaveBeenCalled()
+  })
 })
 
 // ---------------------------------------------------------------------------
-// 5. CWIMethodName type completeness — compile-time check
+// 5. Error handling — backend errors are wrapped properly
+// ---------------------------------------------------------------------------
+
+describe('CWI conformance: error handling', () => {
+  it('wraps backend Error into status "error" with message string', async () => {
+    backend.call = async () => { throw new Error('wallet exploded') }
+    const msg = makeMessage('getPublicKey')
+    const response = await handleCWIRequest(msg, backend)
+    expect(response.status).toBe('error')
+    expect(response.error).toBe('wallet exploded')
+  })
+
+  it('wraps non-Error throws into string', async () => {
+    backend.call = async () => { throw 'string error' }
+    const msg = makeMessage('getPublicKey')
+    const response = await handleCWIRequest(msg, backend)
+    expect(response.status).toBe('error')
+    expect(response.error).toBe('string error')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. CWIMethodName type completeness — compile-time check
 // ---------------------------------------------------------------------------
 
 describe('CWI conformance: CWIMethodName type completeness', () => {
-  it('BSV_BROWSER_METHODS array covers all CWIMethodName values', () => {
-    // This is a runtime check that the constant array matches.
-    // A compile-time check exists via the dispatch table in cwi.ts —
-    // TypeScript will error if a CWIMethodName is missing from the Record.
+  it('BSV_BROWSER_METHODS array covers all 28 CWIMethodName values', () => {
     const methodSet = new Set<string>(BSV_BROWSER_METHODS)
     expect(methodSet.size).toBe(28)
   })
 })
 
 // ---------------------------------------------------------------------------
-// Minimal params helper — provides just enough params for each method to
-// pass validation (not necessarily produce real results)
+// Minimal params helper — provides just enough params for each method
 // ---------------------------------------------------------------------------
 
 function getMinimalParams(method: CWIMethodName): unknown {

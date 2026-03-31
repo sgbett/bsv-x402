@@ -147,8 +147,16 @@ wallet.restoreBackendChoice().catch((err) => {
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('ui/wallet/setup.html') })
-    console.log('x402: extension installed — opening setup page')
+    // Only open wallet setup if using built-in backend (wallet UI may not exist)
+    chrome.storage.local.get('x402_wallet_backend', (result) => {
+      const backend = result.x402_wallet_backend as { type: string } | undefined
+      if (backend?.type === 'external') {
+        console.log('x402: extension installed — external wallet backend, skipping setup page')
+        return
+      }
+      chrome.tabs.create({ url: chrome.runtime.getURL('ui/wallet/setup.html') })
+      console.log('x402: extension installed — opening setup page')
+    })
   } else {
     console.log(`x402: extension updated (reason: ${details.reason})`)
   }

@@ -28,10 +28,13 @@ const $ = <T extends HTMLElement>(id: string): T =>
 // ---------------------------------------------------------------------------
 
 function updateWalletPanel(state: PopupState): void {
-  const statusEl = $<HTMLSpanElement>("status-indicator");
-  const balanceEl = $<HTMLSpanElement>("balance-display");
-  const lockBtn = $<HTMLButtonElement>("lock-btn");
-  const setupContainer = $<HTMLDivElement>("setup-container");
+  const statusEl = document.getElementById("status-indicator");
+  const balanceEl = document.getElementById("balance-display");
+  const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement | null;
+  const setupContainer = document.getElementById("setup-container") as HTMLDivElement | null;
+
+  // Wallet panel elements may not exist if wallet UI has been removed
+  if (!statusEl || !balanceEl || !lockBtn || !setupContainer) return;
 
   if (!state.isSetUp) {
     setupContainer.hidden = false;
@@ -102,17 +105,19 @@ function sendMessage(msg: Record<string, unknown>): Promise<PopupState> {
 // ---------------------------------------------------------------------------
 
 document.addEventListener("DOMContentLoaded", async () => {
-  const walletPanel = $<HTMLDivElement>("wallet-panel");
+  const walletPanel = document.getElementById("wallet-panel");
 
   // Check if wallet backend has its own UI — hide wallet panel if so
-  try {
-    const result = await chrome.storage.local.get("x402_wallet_backend");
-    const backendConfig = result.x402_wallet_backend as { type: string } | undefined;
-    if (backendConfig?.type === "external") {
-      walletPanel.style.display = "none";
+  if (walletPanel) {
+    try {
+      const result = await chrome.storage.local.get("x402_wallet_backend");
+      const backendConfig = result.x402_wallet_backend as { type: string } | undefined;
+      if (backendConfig?.type === "external") {
+        walletPanel.style.display = "none";
+      }
+    } catch {
+      // Default: show wallet panel
     }
-  } catch {
-    // Default: show wallet panel
   }
 
   // Fetch initial state
@@ -133,24 +138,40 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Wallet: Lock / Unlock
-  $<HTMLButtonElement>("lock-btn").addEventListener("click", async () => {
-    const statusEl = $<HTMLSpanElement>("status-indicator");
-    const isCurrentlyUnlocked = statusEl.classList.contains("unlocked");
+  // Wallet: Lock / Unlock (guarded — wallet panel may not exist)
+  const lockBtn = document.getElementById("lock-btn");
+  if (lockBtn) {
+    lockBtn.addEventListener("click", async () => {
+      const statusEl = document.getElementById("status-indicator");
+      if (!statusEl) return;
+      const isCurrentlyUnlocked = statusEl.classList.contains("unlocked");
 
-    if (isCurrentlyUnlocked) {
-      const state = await sendMessage({ type: "lock" });
-      updateUI(state);
-    } else {
-      const password = prompt("Enter wallet password:");
-      if (password === null) return;
-      try {
-        const state = await sendMessage({ type: "unlock", payload: { password } });
+      if (isCurrentlyUnlocked) {
+        const state = await sendMessage({ type: "lock" });
         updateUI(state);
-      } catch (err) {
-        alert(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);
+      } else {
+        const password = prompt("Enter wallet password:");
+        if (password === null) return;
+        try {
+          const state = await sendMessage({ type: "unlock", payload: { password } });
+          updateUI(state);
+        } catch (err) {
+          alert(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-    }
+    });
+  }
+
+  // x402: Indicator mode — load saved value
+  const indicatorSelect = $<HTMLSelectElement>("indicator-mode-select");
+  chrome.storage.local.get("x402_indicator_mode", (result) => {
+    const mode = result.x402_indicator_mode as string | undefined;
+    if (mode) indicatorSelect.value = mode;
+  });
+
+  // x402: Indicator mode — save on change
+  indicatorSelect.addEventListener("change", () => {
+    chrome.storage.local.set({ x402_indicator_mode: indicatorSelect.value });
   });
 
   // x402: Tier change
@@ -164,10 +185,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Wallet: Set up
-  $<HTMLButtonElement>("setup-btn").addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("ui/wallet/setup.html") });
-  });
+  // Wallet: Set up (guarded — wallet panel may not exist)
+  const setupBtn = document.getElementById("setup-btn");
+  if (setupBtn) {
+    setupBtn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ui/wallet/setup.html") });
+    });
+  }
 
   // Settings
   $<HTMLAnchorElement>("settings-link").addEventListener("click", (e) => {
