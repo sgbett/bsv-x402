@@ -1,7 +1,10 @@
 import { execSync } from 'child_process'
 import { cpSync, mkdirSync, existsSync, renameSync, readdirSync } from 'fs'
-import { resolve, join } from 'path'
+import { resolve, join, dirname } from 'path'
+import { fileURLToPath } from 'url'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = dirname(__filename)
 const ROOT = resolve(__dirname, '..')
 const PLUGINS = resolve(__dirname)
 const DIST = resolve(ROOT, 'dist', 'plugins')
@@ -30,13 +33,13 @@ function buildTarget(target: Target) {
   mkdirSync(join(outDir, 'icons'), { recursive: true })
 
   // Bundle background.ts (service worker)
-  execSync(`npx tsup ${join(SHARED, 'background.ts')} --out-dir ${outDir} --format esm --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
+  execSync(`npx tsup ${join(SHARED, 'background.ts')} --out-dir ${outDir} --format esm --target es2020 --no-splitting --no-dts --clean false`, { cwd: ROOT, stdio: 'inherit' })
 
   // Bundle content-script.ts
-  execSync(`npx tsup ${join(SHARED, 'content-script.ts')} --out-dir ${outDir} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
+  execSync(`npx tsup ${join(SHARED, 'content-script.ts')} --out-dir ${outDir} --format iife --target es2020 --no-splitting --no-dts --clean false`, { cwd: ROOT, stdio: 'inherit' })
 
   // Bundle page-script.ts (runs in page context, must be IIFE)
-  execSync(`npx tsup ${join(SHARED, 'page-script.ts')} --out-dir ${outDir} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
+  execSync(`npx tsup ${join(SHARED, 'page-script.ts')} --out-dir ${outDir} --format iife --target es2020 --no-splitting --no-dts --clean false`, { cwd: ROOT, stdio: 'inherit' })
 
   // Bundle UI scripts — shell popup at ui/, wallet and x402 panels in subdirs
   const uiScripts = [
@@ -47,7 +50,7 @@ function buildTarget(target: Target) {
   for (const { src, outDir: scriptOutDir } of uiScripts) {
     if (existsSync(src)) {
       mkdirSync(scriptOutDir, { recursive: true })
-      execSync(`npx tsup ${src} --out-dir ${scriptOutDir} --format iife --target es2020 --no-splitting --clean false`, { cwd: ROOT, stdio: 'inherit' })
+      execSync(`npx tsup ${src} --out-dir ${scriptOutDir} --format iife --target es2020 --no-splitting --no-dts --clean false`, { cwd: ROOT, stdio: 'inherit' })
     }
   }
 
@@ -74,13 +77,15 @@ function buildTarget(target: Target) {
     cpSync(iconsDir, join(outDir, 'icons'), { recursive: true })
   }
 
-  // Rename .mjs outputs to .js for extension compatibility
-  // tsup ESM outputs .mjs, but manifests reference .js
+  // Rename tsup outputs to match manifest expectations
+  // ESM: .mjs → .js | IIFE: .global.js → .js
   for (const dir of [outDir, join(outDir, 'ui'), join(outDir, 'ui', 'wallet'), join(outDir, 'ui', 'x402')]) {
     if (!existsSync(dir)) continue
     for (const file of readdirSync(dir)) {
       if (file.endsWith('.mjs')) {
         renameSync(join(dir, file), join(dir, file.replace(/\.mjs$/, '.js')))
+      } else if (file.endsWith('.global.js')) {
+        renameSync(join(dir, file), join(dir, file.replace(/\.global\.js$/, '.js')))
       }
     }
   }
