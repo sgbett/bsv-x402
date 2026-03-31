@@ -63,9 +63,21 @@ export function setTier(tier: TierName): void {
   console.log(`x402: tier changed to "${currentTier}"`)
 }
 
-/** Get current x402 state for UI. */
-export function getX402State(): { tier: TierName; mode: SpendMode } {
-  return { tier: currentTier, mode: currentMode }
+/** Get current x402 state for UI, including resolved limits. */
+export function getX402State(): {
+  tier: TierName
+  mode: SpendMode
+  limits: { perTxMaxSatoshis: number; windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }> }
+} {
+  const resolved = resolveSpendLimits(currentTier, currentMode)
+  return {
+    tier: currentTier,
+    mode: currentMode,
+    limits: {
+      perTxMaxSatoshis: resolved.perTxMaxSatoshis,
+      windows: resolved.windows.map(w => ({ window: w.window, maxSatoshis: w.maxSatoshis, maxTransactions: w.maxTransactions })),
+    },
+  }
 }
 
 /** Get spend status for the indicator. */

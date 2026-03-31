@@ -24,12 +24,16 @@ export async function handleCWIRequest(
     let validatedSatoshis: number | undefined
     if (request.method === 'createAction') {
       const params = request.params as { outputs?: Array<{ satoshis: unknown }> } | undefined
-      const outputs = params?.outputs ?? []
+      const outputs = params?.outputs
 
-      // Validate each output's satoshis — reject negative, non-integer, or non-numeric values
+      if (!Array.isArray(outputs) || outputs.length === 0) {
+        return { id: request.id, status: 'error', error: 'Missing or empty outputs for createAction' }
+      }
+
+      // Validate each output's satoshis — must be a positive integer
       let total = 0
       for (const o of outputs) {
-        if (typeof o.satoshis !== 'number' || !Number.isFinite(o.satoshis) || !Number.isInteger(o.satoshis) || o.satoshis < 0) {
+        if (typeof o.satoshis !== 'number' || !Number.isFinite(o.satoshis) || !Number.isInteger(o.satoshis) || o.satoshis <= 0) {
           return { id: request.id, status: 'error', error: 'Invalid satoshis value in outputs' }
         }
         total += o.satoshis
