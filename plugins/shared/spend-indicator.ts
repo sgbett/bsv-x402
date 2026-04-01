@@ -35,10 +35,10 @@ export class SpendIndicator {
     this.shadow = this.host.attachShadow({ mode: 'closed' })
     this.shadow.innerHTML = this.getTemplate()
 
-    // Click opens extension options/settings page
+    // Click opens extension popup in a new tab
     this.shadow.querySelector('.x402-indicator')?.addEventListener('click', () => {
       try {
-        chrome.runtime.openOptionsPage()
+        chrome.runtime.sendMessage({ type: 'openPopupTab' })
       } catch {
         // Swallow if API unavailable in this context
       }

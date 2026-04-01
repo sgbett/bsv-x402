@@ -10,7 +10,7 @@ import * as x402 from './x402-controller'
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus'
+  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
   payload?: unknown
 }
 
@@ -105,6 +105,13 @@ chrome.runtime.onMessage.addListener(
           } satisfies CWIResponse)
         })
 
+      return true
+    }
+
+    // Open popup in a tab — allowed from content scripts (for the indicator click)
+    if (isInternalMessage(message) && message.type === 'openPopupTab') {
+      chrome.tabs.create({ url: chrome.runtime.getURL('ui/popup.html') })
+      sendResponse({ ok: true })
       return true
     }
 

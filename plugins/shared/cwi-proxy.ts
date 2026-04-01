@@ -30,13 +30,16 @@ export async function handleCWIRequest(
         return { id: request.id, status: 'error', error: 'Missing or empty outputs for createAction' }
       }
 
-      // Validate each output's satoshis — must be a positive integer
+      // Validate each output's satoshis — must be a positive safe integer, total must stay safe
       let total = 0
       for (const o of outputs) {
-        if (typeof o.satoshis !== 'number' || !Number.isFinite(o.satoshis) || !Number.isInteger(o.satoshis) || o.satoshis <= 0) {
+        if (typeof o.satoshis !== 'number' || !Number.isSafeInteger(o.satoshis) || o.satoshis <= 0) {
           return { id: request.id, status: 'error', error: 'Invalid satoshis value in outputs' }
         }
         total += o.satoshis
+        if (!Number.isSafeInteger(total)) {
+          return { id: request.id, status: 'error', error: 'Total satoshis exceeds safe integer range' }
+        }
       }
       validatedSatoshis = total
 

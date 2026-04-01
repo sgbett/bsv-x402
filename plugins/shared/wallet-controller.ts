@@ -10,9 +10,11 @@ import { ExternalWalletBackend, type ExternalWalletConfig } from './external-wal
 // Owns the wallet backend lifecycle (setup/unlock/lock) and network selection.
 // This is a wallet concern — no x402 spending limits logic.
 //
-// For the built-in backend, the root key is derived from the user's password
-// via PBKDF2 and stored encrypted in chrome.storage.local. The wallet-toolbox
-// Wallet instance is created on unlock using this key.
+// For the built-in backend, the user provides a root key (hex) during setup.
+// This key is encrypted with AES-GCM using a PBKDF2-derived key from the
+// user's password, and persisted in chrome.storage.local. On unlock, the
+// password decrypts the stored root key, which is then passed to
+// wallet-toolbox's SetupClient.createWalletIdb() to initialise the wallet.
 // ---------------------------------------------------------------------------
 
 const WALLET_KEY_STORAGE = 'x402_wallet_rootkey'
@@ -38,8 +40,13 @@ export function isUnlocked(): boolean {
  * and initialise the wallet-toolbox Wallet.
  */
 export async function setup(seed: string, password: string): Promise<void> {
-  // Derive a root key from the seed (the seed IS the root key hex for wallet-toolbox)
-  // Persist the seed encrypted with the password for later unlock
+  // Validate seed is a valid hex string of expected length (64 hex chars = 32 bytes)
+  if (!/^[0-9a-fA-F]{64}$/.test(seed)) {
+    throw new Error('Seed must be a 64-character hex string (32 bytes)')
+  }
+
+  // The seed IS the root key hex for wallet-toolbox
+  // Persist it encrypted with the password for later unlock
   const enc = new TextEncoder()
   const salt = crypto.getRandomValues(new Uint8Array(16))
   const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey'])
