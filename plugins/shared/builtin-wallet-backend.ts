@@ -68,7 +68,7 @@ export class BuiltInWalletBackend implements WalletBackend {
 
     // Delegate to the wallet-toolbox Wallet instance
     // All BRC-100 methods follow the pattern: wallet.method(args, originator?)
-    const fn = (this.wallet as Record<string, Function>)[method]
+    const fn = (this.wallet as unknown as Record<string, Function>)[method]
     if (typeof fn !== 'function') {
       throw new Error(`Wallet does not implement method: ${method}`)
     }

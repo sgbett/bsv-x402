@@ -13,6 +13,7 @@
     "src/storage.ts"
   ],
   "exclude": [
-    "**/*.test.ts"
+    "**/*.test.ts",
+    "plugins/build.ts"
   ]
 }
