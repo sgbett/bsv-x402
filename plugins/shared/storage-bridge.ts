@@ -84,13 +84,14 @@ export class ExtensionStorageAdapter implements StorageAdapter {
   }
 
   async loadSitePolicies(): Promise<Record<string, SitePolicy>> {
+    const empty: Record<string, SitePolicy> = {}
     const result = await chrome.storage.local.get(POLICIES_KEY)
     const raw = result[POLICIES_KEY]
-    if (raw == null) return {}
+    if (raw == null) return empty
     try {
-      return typeof raw === "string" ? JSON.parse(raw) : raw
+      return (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, SitePolicy>
     } catch {
-      return {}
+      return empty
     }
   }
 

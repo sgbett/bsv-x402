@@ -75,6 +75,19 @@ label {
   border-radius: 6px;
 }
 
+#indicator-mode-select {
+  width: 100%;
+  padding: 8px 10px;
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+}
+#indicator-mode-select:focus { border-color: #00d4aa; }
+
 .actions { margin: 16px 0 12px; }
 
 .lock-btn {

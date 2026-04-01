@@ -1,79 +1,16 @@
 /// <reference types="chrome" />
 
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
-import { handleCWIRequest, type CWIHandlerContext } from './cwi'
-import { ExtensionStorageAdapter } from './storage-bridge'
-import { SessionManager, encryptSeed, saveSeed, loadSeed } from './key-manager'
-import { RateLimiter, resolveSpendLimits } from '../../src/limits'
-import type { Challenge, LimitCheckResult, SpendMode, TierName } from '../../src/types'
+import { handleCWIRequest } from './cwi-proxy'
+import * as wallet from './wallet-controller'
+import * as x402 from './x402-controller'
 
 // ---------------------------------------------------------------------------
-// Session state
-// ---------------------------------------------------------------------------
-
-const session = new SessionManager()
-let walletNetwork = 'main'
-let currentTier: TierName = 'Hey, Not Too Rough'
-let currentMode: SpendMode = 'interactive'
-
-const context: CWIHandlerContext = {
-  getSeed: () => session.getSeed(),
-  isUnlocked: () => session.isUnlocked(),
-  getNetwork: () => walletNetwork,
-}
-
-// ---------------------------------------------------------------------------
-// Spend limits integration
-// ---------------------------------------------------------------------------
-
-const storage = new ExtensionStorageAdapter()
-let limiter: RateLimiter | null = null
-
-async function ensureLimiter(): Promise<RateLimiter> {
-  if (limiter) return limiter
-  const limits = resolveSpendLimits(currentTier, currentMode)
-  const state = await storage.load()
-  limiter = new RateLimiter(limits, state ?? undefined)
-  return limiter
-}
-
-async function persistLimiter(rl: RateLimiter): Promise<void> {
-  await storage.save(rl.getState())
-}
-
-/** Check spend limits before a payment. Returns null if allowed, error string if blocked. */
-export async function checkSpendLimits(challenge: Challenge, origin: string): Promise<{ allowed: boolean; reason?: string }> {
-  const rl = await ensureLimiter()
-  const result: LimitCheckResult = rl.check(challenge, origin)
-
-  if (result.action === 'allow') return { allowed: true }
-  if (result.action === 'yellow-light') {
-    // TODO: open approve.html popup for user confirmation
-    return { allowed: false, reason: 'User approval required for this spend' }
-  }
-  if (result.action === 'block') {
-    if (result.severity === 'trip') {
-      rl.trip()
-      await persistLimiter(rl)
-    }
-    return { allowed: false, reason: result.reason }
-  }
-  return { allowed: true }
-}
-
-/** Record a completed payment in the rate limiter. */
-export async function recordPayment(origin: string, satoshis: number, txid: string): Promise<void> {
-  const rl = await ensureLimiter()
-  rl.record({ timestamp: Date.now(), origin, satoshis, txid })
-  await persistLimiter(rl)
-}
-
-// ---------------------------------------------------------------------------
-// Internal messages from popup / setup UI
+// Message type guards
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier'
+  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
   payload?: unknown
 }
 
@@ -85,69 +22,60 @@ function isCWIMessage(msg: unknown): msg is ContentToBackgroundMessage {
   return typeof msg === 'object' && msg !== null && 'request' in msg
 }
 
-async function getWalletState(): Promise<Record<string, unknown>> {
-  const encrypted = await loadSeed()
-  return {
-    isSetUp: encrypted !== null,
-    isUnlocked: session.isUnlocked(),
-    network: walletNetwork,
-    tier: currentTier,
-  }
-}
+// ---------------------------------------------------------------------------
+// Internal message handler — routes to appropriate controller
+// ---------------------------------------------------------------------------
 
 async function handleInternalMessage(message: InternalMessage): Promise<Record<string, unknown>> {
   switch (message.type) {
+    // Wallet concerns
     case 'unlock': {
       const payload = message.payload as { password: string } | undefined
-      if (!payload?.password) {
-        throw new Error('Password required')
-      }
-      await session.unlock(payload.password)
-      console.log('x402: wallet unlocked')
-      return getWalletState()
+      if (!payload?.password) throw new Error('Password required')
+      await wallet.unlock(payload.password)
+      break
     }
-
     case 'lock':
-      session.lock()
-      console.log('x402: wallet locked')
-      return getWalletState()
-
-    case 'getState':
-      return getWalletState()
-
+      wallet.lock()
+      break
+    case 'setup': {
+      const payload = message.payload as { seed: string; password: string; tier?: import('../../src/types').TierName } | undefined
+      if (!payload?.password || !payload?.seed) throw new Error('Seed and password required')
+      await wallet.setup(payload.seed, payload.password)
+      if (payload.tier) x402.setTier(payload.tier)
+      break
+    }
     case 'setNetwork': {
       const payload = message.payload as { network: string } | undefined
-      if (payload?.network === 'main' || payload?.network === 'test') {
-        walletNetwork = payload.network
-      }
-      return getWalletState()
+      if (payload?.network) wallet.setNetwork(payload.network)
+      break
     }
 
-    case 'setup': {
-      const payload = message.payload as { seed: string; password: string } | undefined
-      if (!payload?.password || !payload?.seed) {
-        throw new Error('Seed and password required')
-      }
-      const encrypted = await encryptSeed(payload.seed, payload.password)
-      await saveSeed(encrypted)
-      await session.unlock(payload.password)
-      console.log('x402: wallet set up')
-      return getWalletState()
-    }
-
+    // x402 concerns
     case 'setTier': {
-      const payload = message.payload as { tier: TierName } | undefined
-      if (payload?.tier) {
-        currentTier = payload.tier
-        limiter = null // reset limiter so it picks up new tier
-        console.log(`x402: tier changed to "${currentTier}"`)
-      }
-      return getWalletState()
+      const payload = message.payload as { tier: import('../../src/types').TierName } | undefined
+      if (payload?.tier) x402.setTier(payload.tier)
+      break
+    }
+
+    case 'getState':
+      break // just return composed state below
+
+    case 'switchBackend': {
+      const payload = message.payload as { type: 'builtin' | 'external'; extensionId?: string } | undefined
+      if (!payload?.type) throw new Error('Backend type required')
+      await wallet.switchBackend(payload.type, payload.extensionId ? { extensionId: payload.extensionId } : undefined)
+      break
     }
 
     default:
       throw new Error(`Unknown message type: ${(message as InternalMessage).type}`)
   }
+
+  // All internal messages return composed state from both controllers
+  const walletState = await wallet.getWalletState()
+  const x402State = x402.getX402State()
+  return { ...walletState, ...x402State }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,7 +95,7 @@ chrome.runtime.onMessage.addListener(
         return true
       }
 
-      handleCWIRequest(message, context)
+      handleCWIRequest(message, wallet.getBackend(), sender.tab?.id)
         .then((response) => sendResponse(response))
         .catch((err) => {
           sendResponse({
@@ -177,7 +105,22 @@ chrome.runtime.onMessage.addListener(
           } satisfies CWIResponse)
         })
 
-      return true // keep the message channel open for async sendResponse
+      return true
+    }
+
+    // Open popup in a tab — allowed from content scripts (for the indicator click)
+    if (isInternalMessage(message) && message.type === 'openPopupTab') {
+      chrome.tabs.create({ url: chrome.runtime.getURL('ui/popup.html') })
+      sendResponse({ ok: true })
+      return true
+    }
+
+    // Spend status — allowed from content scripts (for the indicator)
+    if (isInternalMessage(message) && message.type === 'getSpendStatus') {
+      x402.getSpendStatus()
+        .then((status) => sendResponse(status))
+        .catch(() => sendResponse(null))
+      return true
     }
 
     // Route internal messages from popup / setup UI — must NOT come from
@@ -205,10 +148,23 @@ chrome.runtime.onMessage.addListener(
 // Extension install / update handler
 // ---------------------------------------------------------------------------
 
+// Restore wallet backend choice on startup
+wallet.restoreBackendChoice().catch((err) => {
+  console.warn('x402: failed to restore wallet backend:', err)
+})
+
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    chrome.tabs.create({ url: chrome.runtime.getURL('ui/setup.html') })
-    console.log('x402: extension installed — opening setup page')
+    // Only open wallet setup if using built-in backend (wallet UI may not exist)
+    chrome.storage.local.get('x402_wallet_backend', (result) => {
+      const backend = result.x402_wallet_backend as { type: string } | undefined
+      if (backend?.type === 'external') {
+        console.log('x402: extension installed — external wallet backend, skipping setup page')
+        return
+      }
+      chrome.tabs.create({ url: chrome.runtime.getURL('ui/wallet/setup.html') })
+      console.log('x402: extension installed — opening setup page')
+    })
   } else {
     console.log(`x402: extension updated (reason: ${details.reason})`)
   }
@@ -221,8 +177,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.alarms.create('auto-lock', { periodInMinutes: 15 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'auto-lock' && session.isUnlocked()) {
-    session.lock()
+  if (alarm.name === 'auto-lock' && wallet.isUnlocked()) {
+    wallet.lock()
     console.log('x402: wallet auto-locked after idle timeout')
   }
 })

@@ -3,44 +3,66 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>bsv-x402 Wallet</title>
+  <title>bsv-x402</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <div class="popup">
     <header>
-      <h1>bsv-x402 Wallet</h1>
+      <h1>bsv-x402</h1>
       <span id="status-indicator" class="status locked">Locked</span>
     </header>
 
-    <section class="balance">
-      <label>Balance</label>
-      <span id="balance-display">--- sats</span>
-    </section>
+    <!-- ============================================================
+         Wallet panel — only shown when built-in backend is active.
+         This entire section can be removed when a proper wallet UI
+         package exists. It MUST NOT reference x402 concerns.
+         ============================================================ -->
+    <div id="wallet-panel">
+      <section class="balance">
+        <label>Balance</label>
+        <span id="balance-display">--- sats</span>
+      </section>
 
-    <section class="tier">
-      <label>Spending Tier</label>
-      <span id="current-tier" class="tier-name">Hey, Not Too Rough</span>
-      <select id="tier-select">
-        <option value="I'm Too Young to Die">I'm Too Young to Die</option>
-        <option value="Hey, Not Too Rough" selected>Hey, Not Too Rough</option>
-        <option value="Hurt Me Plenty">Hurt Me Plenty</option>
-        <option value="Ultra-Violence">Ultra-Violence</option>
-        <option value="Nightmare!">Nightmare!</option>
-      </select>
-    </section>
+      <div class="actions">
+        <button id="lock-btn" class="lock-btn locked">Unlock</button>
+      </div>
 
-    <section class="limits">
-      <label>Spend Limits</label>
-      <div id="limits-summary" class="limits-summary">No active limits</div>
-    </section>
-
-    <div class="actions">
-      <button id="lock-btn" class="lock-btn locked">Unlock</button>
+      <div id="setup-container" class="setup-container" hidden>
+        <button id="setup-btn" class="setup-btn">Set Up Wallet</button>
+      </div>
     </div>
 
-    <div id="setup-container" class="setup-container" hidden>
-      <button id="setup-btn" class="setup-btn">Set Up Wallet</button>
+    <!-- ============================================================
+         x402 panel — always shown regardless of wallet backend.
+         Spending limits, tier selection, per-site policies.
+         ============================================================ -->
+    <div id="x402-panel">
+      <section class="tier">
+        <label>Spending Tier</label>
+        <span id="current-tier" class="tier-name">Hey, Not Too Rough</span>
+        <select id="tier-select">
+          <option value="I'm Too Young to Die">I'm Too Young to Die</option>
+          <option value="Hey, Not Too Rough" selected>Hey, Not Too Rough</option>
+          <option value="Hurt Me Plenty">Hurt Me Plenty</option>
+          <option value="Ultra-Violence">Ultra-Violence</option>
+          <option value="Nightmare!">Nightmare!</option>
+        </select>
+      </section>
+
+      <section class="limits">
+        <label>Spend Limits</label>
+        <div id="limits-summary" class="limits-summary">No active limits</div>
+      </section>
+
+      <section class="indicator-mode">
+        <label>Spend Indicator</label>
+        <select id="indicator-mode-select">
+          <option value="bar">Bar</option>
+          <option value="badge">Badge</option>
+          <option value="hidden">Hidden</option>
+        </select>
+      </section>
     </div>
 
     <footer>

@@ -2,12 +2,18 @@
 
 import type { TierName } from "../../../src/types";
 
-interface WalletState {
+// ---------------------------------------------------------------------------
+// Popup state — composed from wallet + x402 controllers
+// ---------------------------------------------------------------------------
+
+interface PopupState {
+  // Wallet concerns
   isSetUp: boolean;
   isUnlocked: boolean;
   network: string;
-  tier: TierName;
   balance?: number;
+  // x402 concerns
+  tier: TierName;
   limits?: {
     perTxMaxSatoshis: number;
     windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }>;
@@ -17,16 +23,19 @@ interface WalletState {
 const $ = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
-function updateUI(state: WalletState): void {
-  const statusEl = $<HTMLSpanElement>("status-indicator");
-  const balanceEl = $<HTMLSpanElement>("balance-display");
-  const currentTierEl = $<HTMLSpanElement>("current-tier");
-  const tierSelect = $<HTMLSelectElement>("tier-select");
-  const lockBtn = $<HTMLButtonElement>("lock-btn");
-  const setupContainer = $<HTMLDivElement>("setup-container");
-  const limitsEl = $<HTMLDivElement>("limits-summary");
+// ---------------------------------------------------------------------------
+// Wallet panel UI (only when built-in backend is active)
+// ---------------------------------------------------------------------------
 
-  // Not set up — show setup prompt, hide everything else
+function updateWalletPanel(state: PopupState): void {
+  const statusEl = document.getElementById("status-indicator");
+  const balanceEl = document.getElementById("balance-display");
+  const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement | null;
+  const setupContainer = document.getElementById("setup-container") as HTMLDivElement | null;
+
+  // Wallet panel elements may not exist if wallet UI has been removed
+  if (!statusEl || !balanceEl || !lockBtn || !setupContainer) return;
+
   if (!state.isSetUp) {
     setupContainer.hidden = false;
     lockBtn.style.display = "none";
@@ -36,7 +45,6 @@ function updateUI(state: WalletState): void {
   setupContainer.hidden = true;
   lockBtn.style.display = "";
 
-  // Lock / unlock status
   if (state.isUnlocked) {
     statusEl.textContent = "Unlocked";
     statusEl.className = "status unlocked";
@@ -49,15 +57,22 @@ function updateUI(state: WalletState): void {
     lockBtn.className = "lock-btn locked";
   }
 
-  // Balance
   balanceEl.textContent =
     state.balance !== undefined ? `${state.balance.toLocaleString()} sats` : "--- sats";
+}
 
-  // Tier
+// ---------------------------------------------------------------------------
+// x402 panel UI (always shown)
+// ---------------------------------------------------------------------------
+
+function updateX402Panel(state: PopupState): void {
+  const currentTierEl = $<HTMLSpanElement>("current-tier");
+  const tierSelect = $<HTMLSelectElement>("tier-select");
+  const limitsEl = $<HTMLDivElement>("limits-summary");
+
   currentTierEl.textContent = state.tier;
   tierSelect.value = state.tier;
 
-  // Limits summary
   if (state.limits) {
     const lines = state.limits.windows.map(
       (w) => `${w.window}: ${w.maxSatoshis.toLocaleString()} sats / ${w.maxTransactions} txs`
@@ -69,25 +84,52 @@ function updateUI(state: WalletState): void {
   }
 }
 
-function sendMessage(msg: Record<string, unknown>): Promise<WalletState> {
-  return new Promise<WalletState>((resolve, reject) => {
+// ---------------------------------------------------------------------------
+// Message helper
+// ---------------------------------------------------------------------------
+
+function sendMessage(msg: Record<string, unknown>): Promise<PopupState> {
+  return new Promise<PopupState>((resolve, reject) => {
     chrome.runtime.sendMessage(msg, (response) => {
       if (chrome.runtime.lastError) {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
-      resolve(response as WalletState);
+      resolve(response as PopupState);
     });
   });
 }
 
+// ---------------------------------------------------------------------------
+// Initialisation
+// ---------------------------------------------------------------------------
+
 document.addEventListener("DOMContentLoaded", async () => {
+  const walletPanel = document.getElementById("wallet-panel");
+
+  // Check if wallet backend has its own UI — hide wallet panel if so
+  if (walletPanel) {
+    try {
+      const result = await chrome.storage.local.get("x402_wallet_backend");
+      const backendConfig = result.x402_wallet_backend as { type: string } | undefined;
+      if (backendConfig?.type === "external") {
+        walletPanel.style.display = "none";
+      }
+    } catch {
+      // Default: show wallet panel
+    }
+  }
+
   // Fetch initial state
+  function updateUI(state: PopupState): void {
+    updateWalletPanel(state);
+    updateX402Panel(state);
+  }
+
   try {
     const state = await sendMessage({ type: "getState" });
     updateUI(state);
   } catch {
-    // Background not ready — show setup
     updateUI({
       isSetUp: false,
       isUnlocked: false,
@@ -96,27 +138,43 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Lock / Unlock
-  $<HTMLButtonElement>("lock-btn").addEventListener("click", async () => {
-    const statusEl = $<HTMLSpanElement>("status-indicator");
-    const isCurrentlyUnlocked = statusEl.classList.contains("unlocked");
+  // Wallet: Lock / Unlock (guarded — wallet panel may not exist)
+  const lockBtn = document.getElementById("lock-btn");
+  if (lockBtn) {
+    lockBtn.addEventListener("click", async () => {
+      const statusEl = document.getElementById("status-indicator");
+      if (!statusEl) return;
+      const isCurrentlyUnlocked = statusEl.classList.contains("unlocked");
 
-    if (isCurrentlyUnlocked) {
-      const state = await sendMessage({ type: "lock" });
-      updateUI(state);
-    } else {
-      const password = prompt("Enter wallet password:");
-      if (password === null) return;
-      try {
-        const state = await sendMessage({ type: "unlock", payload: { password } });
+      if (isCurrentlyUnlocked) {
+        const state = await sendMessage({ type: "lock" });
         updateUI(state);
-      } catch (err) {
-        alert(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);
+      } else {
+        const password = prompt("Enter wallet password:");
+        if (password === null) return;
+        try {
+          const state = await sendMessage({ type: "unlock", payload: { password } });
+          updateUI(state);
+        } catch (err) {
+          alert(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-    }
+    });
+  }
+
+  // x402: Indicator mode — load saved value
+  const indicatorSelect = $<HTMLSelectElement>("indicator-mode-select");
+  chrome.storage.local.get("x402_indicator_mode", (result) => {
+    const mode = result.x402_indicator_mode as string | undefined;
+    if (mode) indicatorSelect.value = mode;
   });
 
-  // Tier change
+  // x402: Indicator mode — save on change
+  indicatorSelect.addEventListener("change", () => {
+    chrome.storage.local.set({ x402_indicator_mode: indicatorSelect.value });
+  });
+
+  // x402: Tier change
   $<HTMLSelectElement>("tier-select").addEventListener("change", async (e) => {
     const tier = (e.target as HTMLSelectElement).value as TierName;
     try {
@@ -127,10 +185,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   });
 
-  // Set up wallet
-  $<HTMLButtonElement>("setup-btn").addEventListener("click", () => {
-    chrome.tabs.create({ url: chrome.runtime.getURL("ui/setup.html") });
-  });
+  // Wallet: Set up (guarded — wallet panel may not exist)
+  const setupBtn = document.getElementById("setup-btn");
+  if (setupBtn) {
+    setupBtn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ui/wallet/setup.html") });
+    });
+  }
 
   // Settings
   $<HTMLAnchorElement>("settings-link").addEventListener("click", (e) => {
