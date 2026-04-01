@@ -155,8 +155,28 @@ wallet.restoreBackendChoice().catch((err) => {
 
 chrome.runtime.onInstalled.addListener((details) => {
   if (details.reason === 'install') {
-    // Only open wallet setup if using built-in backend (wallet UI may not exist)
-    chrome.storage.local.get('x402_wallet_backend', (result) => {
+    // Check for test-mode auto-setup (e.g. Selenium e2e tests)
+    chrome.storage.local.get(['x402_test_config', 'x402_wallet_backend'], async (result) => {
+      const testConfig = result.x402_test_config as {
+        rootKeyHex: string
+        password: string
+        chain?: 'main' | 'test'
+        tier?: import('../../src/types').TierName
+      } | undefined
+
+      if (testConfig?.rootKeyHex && testConfig?.password) {
+        try {
+          await wallet.setup(testConfig.rootKeyHex, testConfig.password)
+          if (testConfig.chain) wallet.setNetwork(testConfig.chain)
+          if (testConfig.tier) x402.setTier(testConfig.tier)
+          console.log('x402: test-mode auto-setup complete')
+        } catch (err) {
+          console.error('x402: test-mode auto-setup failed:', err)
+        }
+        return
+      }
+
+      // Only open wallet setup if using built-in backend
       const backend = result.x402_wallet_backend as { type: string } | undefined
       if (backend?.type === 'external') {
         console.log('x402: extension installed — external wallet backend, skipping setup page')

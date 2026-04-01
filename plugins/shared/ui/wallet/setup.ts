@@ -43,9 +43,9 @@ async function generateSeed(): Promise<string> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: 'generateSeed' }, (response) => {
       if (chrome.runtime.lastError || !response?.seed) {
-        // Fallback: generate a random 128-bit hex string locally.
-        // A real implementation would use BIP-39 mnemonic generation.
-        const bytes = crypto.getRandomValues(new Uint8Array(16))
+        // Fallback: generate a random 256-bit hex string locally.
+        // wallet-toolbox requires a 32-byte (64 hex char) root key.
+        const bytes = crypto.getRandomValues(new Uint8Array(32))
         const hex = Array.from(bytes)
           .map((b) => b.toString(16).padStart(2, '0'))
           .join('')
