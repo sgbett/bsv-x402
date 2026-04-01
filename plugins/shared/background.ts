@@ -169,6 +169,7 @@ chrome.runtime.onInstalled.addListener((details) => {
           await wallet.setup(testConfig.rootKeyHex, testConfig.password)
           if (testConfig.chain) wallet.setNetwork(testConfig.chain)
           if (testConfig.tier) x402.setTier(testConfig.tier)
+          await chrome.storage.local.remove('x402_test_config')
           console.log('x402: test-mode auto-setup complete')
         } catch (err) {
           console.error('x402: test-mode auto-setup failed:', err)
