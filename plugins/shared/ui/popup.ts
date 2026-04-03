@@ -95,6 +95,10 @@ function sendMessage(msg: Record<string, unknown>): Promise<PopupState> {
         reject(new Error(chrome.runtime.lastError.message));
         return;
       }
+      if (response?.status === 'error') {
+        reject(new Error(response.error ?? 'Unknown error'));
+        return;
+      }
       resolve(response as PopupState);
     });
   });
@@ -139,7 +143,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   }
 
   // Wallet: Lock / Unlock (guarded — wallet panel may not exist)
-  const lockBtn = document.getElementById("lock-btn");
+  const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement | null;
+  const unlockForm = document.getElementById("unlock-form") as HTMLDivElement | null;
+  const unlockPassword = document.getElementById("unlock-password") as HTMLInputElement | null;
+  const unlockError = document.getElementById("unlock-error") as HTMLDivElement | null;
+
   if (lockBtn) {
     lockBtn.addEventListener("click", async () => {
       const statusEl = document.getElementById("status-indicator");
@@ -148,18 +156,46 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (isCurrentlyUnlocked) {
         const state = await sendMessage({ type: "lock" });
+        if (unlockForm) unlockForm.hidden = true;
         updateUI(state);
       } else {
-        const password = prompt("Enter wallet password:");
-        if (password === null) return;
-        try {
-          const state = await sendMessage({ type: "unlock", payload: { password } });
-          updateUI(state);
-        } catch (err) {
-          alert(`Unlock failed: ${err instanceof Error ? err.message : String(err)}`);
+        // Show password field if hidden, submit if visible with value
+        if (unlockForm && unlockPassword) {
+          if (unlockForm.hidden) {
+            unlockForm.hidden = false;
+            unlockPassword.value = "";
+            if (unlockError) unlockError.textContent = "";
+            unlockPassword.focus();
+            return;
+          }
+
+          const password = unlockPassword.value;
+          if (!password) {
+            unlockPassword.focus();
+            return;
+          }
+
+          lockBtn.disabled = true;
+          try {
+            const state = await sendMessage({ type: "unlock", payload: { password } });
+            unlockForm.hidden = true;
+            unlockPassword.value = "";
+            updateUI(state);
+          } catch (err) {
+            if (unlockError) unlockError.textContent = err instanceof Error ? err.message : String(err);
+          } finally {
+            lockBtn.disabled = false;
+          }
         }
       }
     });
+
+    // Allow Enter key to submit password
+    if (unlockPassword) {
+      unlockPassword.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") lockBtn.click();
+      });
+    }
   }
 
   // x402: Indicator mode — load saved value
@@ -193,9 +229,4 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Settings
-  $<HTMLAnchorElement>("settings-link").addEventListener("click", (e) => {
-    e.preventDefault();
-    chrome.runtime.openOptionsPage();
-  });
 });
