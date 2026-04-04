@@ -6,7 +6,7 @@ import type { Brc105Challenge } from "./types"
  * Expects four headers:
  *   - x-bsv-payment-version (must be "1.0")
  *   - x-bsv-payment-satoshis-required (positive integer)
- *   - x-bsv-auth-identity-key (non-empty)
+ *   - x-bsv-auth-identity-key or x-bsv-payment-identity-key (compressed pubkey)
  *   - x-bsv-payment-derivation-prefix (non-empty)
  */
 export function parseBrc105Challenge(response: Response): Brc105Challenge {
@@ -31,12 +31,15 @@ export function parseBrc105Challenge(response: Response): Brc105Challenge {
     throw new Error("BRC-105: satoshis-required must be a positive integer")
   }
 
-  const serverIdentityKey = response.headers.get("x-bsv-auth-identity-key")
+  // Accept identity key from BRC-103 auth layer or standalone BRC-105 header
+  const serverIdentityKey =
+    response.headers.get("x-bsv-auth-identity-key") ??
+    response.headers.get("x-bsv-payment-identity-key")
   if (serverIdentityKey === null || serverIdentityKey.length === 0) {
-    throw new Error("BRC-105: missing or empty x-bsv-auth-identity-key header")
+    throw new Error("BRC-105: missing identity key (expected x-bsv-auth-identity-key or x-bsv-payment-identity-key)")
   }
   if (!/^0[23][0-9a-fA-F]{64}$/.test(serverIdentityKey)) {
-    throw new Error("BRC-105: x-bsv-auth-identity-key must be a 33-byte compressed public key (hex)")
+    throw new Error("BRC-105: identity key must be a 33-byte compressed public key (hex)")
   }
 
   const derivationPrefix = response.headers.get("x-bsv-payment-derivation-prefix")
