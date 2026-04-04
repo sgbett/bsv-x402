@@ -203,6 +203,13 @@ describe("constructBrc105Proof", () => {
     expect(bytes).toEqual([0xde, 0xad, 0xbe, 0xef])
   })
 
+  it("throws on odd-length rawTx hex string", async () => {
+    const wallet = mockWallet({
+      createAction: vi.fn().mockResolvedValue({ txid: "aabb", rawTx: "deadbee" }),
+    })
+    await expect(constructBrc105Proof(CHALLENGE, wallet)).rejects.toThrow("even length")
+  })
+
   it("handles tx number array → base64 conversion", async () => {
     const txBytes = [0xca, 0xfe, 0xba, 0xbe]
     const wallet = mockWallet({
