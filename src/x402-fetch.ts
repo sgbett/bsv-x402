@@ -266,7 +266,21 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       rl.record(makeLedgerEntry(proof))
       await persist(rl)
 
-      return retryWithProof(proof)
+      // Retry the paid request with backoff (up to 3 attempts)
+      const maxAttempts = 3
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await retryWithProof(proof)
+        } catch (err) {
+          if (attempt >= maxAttempts) {
+            console.error(`[x402] Paid request failed after ${maxAttempts} attempts (${protocol}):`, err)
+            return originalResponse
+          }
+          // Exponential backoff: 500ms, 1000ms
+          await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)))
+        }
+      }
+      return originalResponse // unreachable, but satisfies TypeScript
     })
   }
 
@@ -330,7 +344,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
           if (brc105ProofConstructor) {
             return brc105ProofConstructor(brc105Challenge)
           }
-          return constructBrc105Proof(brc105Challenge, brc105Wallet!)
+          return constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
         },
         (proof) => {
           const headers = new Headers(init?.headers)

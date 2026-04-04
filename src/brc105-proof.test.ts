@@ -173,6 +173,30 @@ describe("constructBrc105Proof", () => {
     expect(params.outputs[0].lockingScript).toMatch(/^76a914[0-9a-f]{40}88ac$/)
   })
 
+  it("sets outputDescription on the payment output", async () => {
+    const wallet = mockWallet()
+    await constructBrc105Proof(CHALLENGE, wallet)
+
+    const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(params.outputs[0].outputDescription).toBe("HTTP request payment")
+  })
+
+  it("includes origin in action description when provided", async () => {
+    const wallet = mockWallet()
+    await constructBrc105Proof(CHALLENGE, wallet, "https://api.example.com")
+
+    const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(params.description).toBe("Payment for request to https://api.example.com")
+  })
+
+  it("uses generic description when origin is not provided", async () => {
+    const wallet = mockWallet()
+    await constructBrc105Proof(CHALLENGE, wallet)
+
+    const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(params.description).toBe("BRC-105 payment")
+  })
+
   it("includes customInstructions with derivation data and payee", async () => {
     const wallet = mockWallet()
     const proof = await constructBrc105Proof(CHALLENGE, wallet)

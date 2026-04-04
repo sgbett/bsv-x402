@@ -163,6 +163,7 @@ export interface CWICreateActionOutput {
   satoshis: number
   lockingScript: string
   description?: string
+  outputDescription?: string
   customInstructions?: string
 }
 
