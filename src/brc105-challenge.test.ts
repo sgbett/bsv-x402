@@ -86,6 +86,15 @@ describe("parseBrc105Challenge", () => {
     expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
   })
 
+  it("falls back to payment header when auth header is empty", () => {
+    const c = parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-auth-identity-key": "",
+      "x-bsv-payment-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    }))
+    expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+  })
+
   it("prefers x-bsv-auth-identity-key when both are present", () => {
     const c = parseBrc105Challenge(makeResponse({
       ...VALID_HEADERS,

@@ -31,10 +31,13 @@ export function parseBrc105Challenge(response: Response): Brc105Challenge {
     throw new Error("BRC-105: satoshis-required must be a positive integer")
   }
 
-  // Accept identity key from BRC-103 auth layer or standalone BRC-105 header
+  // Accept identity key from BRC-103 auth layer or standalone BRC-105 header.
+  // Treat empty values as absent so the fallback works when auth middleware
+  // sends an empty header but the payment header has a valid key.
   const serverIdentityKey =
-    response.headers.get("x-bsv-auth-identity-key") ??
-    response.headers.get("x-bsv-payment-identity-key")
+    response.headers.get("x-bsv-auth-identity-key") ||
+    response.headers.get("x-bsv-payment-identity-key") ||
+    null
   if (serverIdentityKey === null || serverIdentityKey.length === 0) {
     throw new Error("BRC-105: missing identity key (expected x-bsv-auth-identity-key or x-bsv-payment-identity-key)")
   }
