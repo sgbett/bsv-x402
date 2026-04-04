@@ -2,6 +2,7 @@
 
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import { handleCWIRequest } from './cwi-proxy'
+import { BuiltInWalletBackend } from './builtin-wallet-backend'
 import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
 
@@ -65,6 +66,73 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Scan for legacy P2PKH UTXOs at the identity key address
+// ---------------------------------------------------------------------------
+
+async function scanAndImportUtxos(): Promise<void> {
+  const rootKeyHex = wallet.getRootKeyHex()
+  if (!rootKeyHex) return
+
+  const backend = wallet.getBackend()
+  const { publicKey: identityKeyHex } = await backend.call('getPublicKey', { identityKey: true }, 'self') as { publicKey: string }
+  const address = await pubkeyToAddress(identityKeyHex)
+
+  // Look up UTXOs at the identity key's P2PKH address
+  const utxos = await fetchUtxos(address)
+  if (utxos.length === 0) {
+    console.log('x402: no legacy UTXOs found at identity address')
+    return
+  }
+
+  console.log(`x402: found ${utxos.length} UTXO(s) at identity address, importing...`)
+
+  // Build outpoints and KeyPairAddress for fundWalletFromP2PKHOutpoints
+  const outpoints = utxos.map((u) => `${u.tx_hash}.${u.tx_pos}`)
+  const { PrivateKey } = await import('@bsv/sdk')
+  const privateKey = PrivateKey.fromHex(rootKeyHex)
+  const publicKey = privateKey.toPublicKey()
+  const p2pkhKey = { privateKey, publicKey, address }
+
+  const { SetupClient } = await import('@bsv/wallet-toolbox-client')
+  if (!(backend instanceof BuiltInWalletBackend)) return
+  const walletInterface = backend.getWalletInterface()
+  if (!walletInterface) {
+    console.warn('x402: wallet instance not available for UTXO import')
+    return
+  }
+
+  const results = await SetupClient.fundWalletFromP2PKHOutpoints(walletInterface, outpoints, p2pkhKey)
+  for (const r of results) {
+    if (r.success) {
+      console.log(`x402: imported UTXO ${r.outpoint} → ${r.txid}`)
+    } else {
+      console.warn(`x402: failed to import UTXO ${r.outpoint}: ${r.error}`)
+    }
+  }
+}
+
+async function fetchUtxos(address: string): Promise<Array<{ tx_hash: string; tx_pos: number; value: number }>> {
+  const providers = [
+    `https://api.whatsonchain.com/v1/bsv/main/address/${address}/unspent`,
+  ]
+  for (const url of providers) {
+    try {
+      const ctrl = new AbortController()
+      const t = setTimeout(() => ctrl.abort(), 8000)
+      const res = await fetch(url, { signal: ctrl.signal })
+      clearTimeout(t)
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) return data
+      }
+    } catch {
+      // Try next provider
+    }
+  }
+  return []
+}
+
+// ---------------------------------------------------------------------------
 // Message type guards
 // ---------------------------------------------------------------------------
 
@@ -92,6 +160,10 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       const payload = message.payload as { password: string } | undefined
       if (!payload?.password) throw new Error('Password required')
       await wallet.unlock(payload.password)
+      // Scan for legacy P2PKH UTXOs in the background (don't block unlock)
+      scanAndImportUtxos().catch((err) => {
+        console.warn('x402: UTXO scan failed (non-blocking):', err)
+      })
       break
     }
     case 'lock':
@@ -127,7 +199,7 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       const address = await pubkeyToAddress(result.publicKey)
       const walletState = await wallet.getWalletState()
       const x402State = x402.getX402State()
-      return { ...walletState, ...x402State, address }
+      return { ...walletState, ...x402State, identityKey: result.publicKey, address }
     }
 
     case 'switchBackend': {

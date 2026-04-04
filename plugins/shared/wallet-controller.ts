@@ -21,6 +21,7 @@ const WALLET_KEY_STORAGE = 'x402_wallet_rootkey'
 
 let walletNetwork: 'main' | 'test' = 'main'
 let walletInitialised = false
+let rootKeyHexInMemory: string | null = null
 
 /** The active wallet backend. Defaults to built-in. */
 let backend: WalletBackend = new BuiltInWalletBackend()
@@ -72,6 +73,7 @@ export async function setup(seed: string, password: string): Promise<void> {
   if (backend instanceof BuiltInWalletBackend) {
     await backend.setup(seed, walletNetwork)
     walletInitialised = true
+    rootKeyHexInMemory = seed
   }
   console.log('x402: wallet set up')
 }
@@ -108,6 +110,7 @@ export async function unlock(password: string): Promise<void> {
   if (backend instanceof BuiltInWalletBackend) {
     await backend.setup(rootKeyHex, walletNetwork)
     walletInitialised = true
+    rootKeyHexInMemory = rootKeyHex
   }
   console.log('x402: wallet unlocked')
 }
@@ -118,8 +121,14 @@ export function lock(): void {
   if (backend instanceof BuiltInWalletBackend) {
     backend = new BuiltInWalletBackend()
     walletInitialised = false
+    rootKeyHexInMemory = null
   }
   console.log('x402: wallet locked')
+}
+
+/** Get the root key hex (only available while unlocked). */
+export function getRootKeyHex(): string | null {
+  return rootKeyHexInMemory
 }
 
 /** Set the network. Only accepts 'main' or 'test'. */
