@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.3.0] - 2026-04-04
+
+### Added
+
+- **BRC-105 payment protocol support** — `x402Fetch` now handles BRC-105 402 responses (`x-bsv-payment-*` headers) with BRC-29 key derivation, proof construction, and automatic retry. Runs alongside the existing custom `X402-Challenge`/`X402-Proof` protocol.
+- **Protocol detection** — on a 402 response, `x402Fetch` auto-detects the protocol from response headers. Custom (`X402-Challenge`) takes priority when both are present.
+- **`Brc105Wallet` interface** — minimal 3-method abstraction (`getPublicKey`, `createHmac`, `createAction`) that works with both `CWIInterface` (page context) and SDK `WalletInterface` (extension context)
+- **`parseBrc105Challenge()`** — parses and validates BRC-105 402 headers including compressed public key format validation on `serverIdentityKey`
+- **`constructBrc105Proof()`** — BRC-29 key derivation with inline RIPEMD-160 implementation (no `@bsv/sdk` dependency in core library), P2PKH locking script construction, base64 BEEF encoding
+- **`PaymentRequest` interface** — protocol-agnostic payment abstraction for spending controls
+- **Browser extension icons** — 16/48/128px icons for Chromium, Firefox, and Safari
+- **Inline unlock form** — replaces `prompt()` with masked password input in extension popup, with Enter key support and inline error display
+
+### Changed
+
+- **`RateLimiter.check()`** — now accepts `Challenge | PaymentRequest` (backwards compatible), enabling protocol-agnostic spending control
+- **`LedgerEntry`** — gains optional `protocol` field for audit trail (backwards compatible with persisted state)
+- **`handlePaymentFlow` helper** — shared payment flow for both protocols, deduplicating site policy, rate limiting, 2FA, yellow-light, and proof construction logic
+- **`X402Config`** — gains `brc105ProofConstructor` and `brc105Wallet` options
+- **CWI proxy** — uses `PaymentRequest` instead of synthetic `Challenge` objects
+- **Extension sender check** — allows messages from extension pages opened as tabs (fixes wallet setup page)
+
+### Fixed
+
+- Extension messaging hardened against context invalidation — content script catches `chrome.runtime.sendMessage` throws on service worker restart, stops polling, and unmounts indicator
+- `hexToBytes` guards against odd-length hex input (prevents silent truncation of transaction data)
+- Popup `sendMessage` rejects error responses instead of treating them as valid state (fixes silent "Set Up Wallet" corruption on bad password)
+- Settings link removed (no options page existed; was a no-op click handler)
+
+### Security
+
+- Compressed public key format validation on `serverIdentityKey` — rejects values not matching 33-byte hex (`/^0[23][0-9a-fA-F]{64}$/`)
+- Real txid from wallet `createAction` result threaded into BRC-105 ledger entries (auditable, unique)
+- `handlePaymentFlow` protocol parameter prevents BRC-105 payments being misrecorded as "x402" in rate limiter checks
+- RIPEMD-160 implementation verified against standard test vectors (empty, "abc", "message digest")
+
 ## [0.2.0] - 2026-04-01
 
 ### Added
