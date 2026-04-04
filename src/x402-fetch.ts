@@ -1,10 +1,14 @@
+import { parseBrc105Challenge } from "./brc105-challenge"
+import { constructBrc105Proof } from "./brc105-proof"
 import { parseChallenge } from "./challenge"
 import { RateLimiter, resolveSpendLimits } from "./limits"
 import { resolveSitePolicy } from "./site-policy"
 import { LocalStorageAdapter } from "./storage"
 import type {
+  Brc105Challenge,
   Challenge,
   LimitCheckResult,
+  PaymentRequest,
   Proof,
   StorageAdapter,
   TwoFactorProvider,
@@ -140,6 +144,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const storage: StorageAdapter = config.storage ?? new LocalStorageAdapter()
   const twoFactor = config.twoFactorProvider
   const constructProof = config.proofConstructor ?? defaultConstructProof
+  const brc105ProofConstructor = config.brc105ProofConstructor
+  const brc105Wallet = config.brc105Wallet
   const nowFn = config.now ?? Date.now
   const mutex = createMutex()
 
@@ -168,6 +174,101 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
     await storage.saveSitePolicies(limits.sitePolicies)
   }
 
+  /**
+   * Shared payment flow for both custom (X402) and BRC-105 protocols.
+   * Handles site policy, rate limiting, 2FA, yellow-light, proof construction, and retry.
+   */
+  async function handlePaymentFlow<P>(
+    originalResponse: Response,
+    input: RequestInfo | URL,
+    init: RequestInit | undefined,
+    origin: string,
+    amount: number,
+    protocol: import("./types").PaymentProtocol,
+    buildProof: () => Promise<P>,
+    retryWithProof: (proof: P) => Promise<Response>,
+    makeLedgerEntry: (proof: P) => import("./types").LedgerEntry,
+  ): Promise<Response> {
+    return mutex(async () => {
+      const rl = await ensureInitialised()
+
+      // Resolve per-site policy (may prompt on first visit)
+      const sitePolicy = await resolveSitePolicy(origin, limits, twoFactor)
+      if (sitePolicy.action === "block") return originalResponse
+
+      // Persist new site policy if it was just created
+      if (!limits.sitePolicies[origin]) {
+        limits.sitePolicies[origin] = sitePolicy
+        await storage.saveSitePolicies(limits.sitePolicies)
+      }
+
+      // Build a SpendCheckable for the rate limiter
+      const spendCheckable: PaymentRequest = { amount, origin, protocol }
+      const result: LimitCheckResult = rl.check(spendCheckable, origin)
+
+      if (result.action === "block") {
+        if (result.severity === "trip") {
+          rl.trip()
+          await persist(rl)
+          config.onLimitReached?.(result.reason)
+          return originalResponse
+        }
+
+        // Window blocks can be overridden with 2FA (one-shot exception)
+        if (result.severity === "window" && twoFactor) {
+          config.onLimitReached?.(result.reason)
+          const override = await twoFactor.verify({
+            type: "limit-override",
+            amount,
+            origin,
+            reason: result.reason,
+          })
+          if (override) {
+            // User approved — proceed with this one payment
+          } else {
+            return originalResponse
+          }
+        } else {
+          config.onLimitReached?.(result.reason)
+          return originalResponse
+        }
+      }
+
+      if (result.action === "yellow-light") {
+        const proceed = config.onYellowLight
+          ? await config.onYellowLight(result.detail)
+          : false
+        if (!proceed) return originalResponse
+      }
+
+      // 2FA for high-value tx
+      if (limits.require2fa.onHighValueTx && amount > limits.require2fa.highValueThreshold) {
+        if (!twoFactor) return originalResponse // no provider → block
+        const verified = await twoFactor.verify({
+          type: "high-value-tx",
+          amount,
+          origin,
+        })
+        if (!verified) return originalResponse
+      }
+
+      // Construct proof and retry
+      let proof: P
+      try {
+        proof = await buildProof()
+      } catch {
+        // Proof construction failed — return original 402
+        return originalResponse
+      }
+
+      // Record the payment
+      rl.record(makeLedgerEntry(proof))
+      await persist(rl)
+
+      return retryWithProof(proof)
+    })
+  }
+
   const fetchFn: X402FetchFn = async function x402Fetch(
     input: RequestInfo | URL,
     init?: RequestInit,
@@ -176,97 +277,77 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
     if (response.status !== 402) return response
 
-    const challengeHeader = response.headers.get("X402-Challenge")
-    if (!challengeHeader) return response
-
-    let challenge: Challenge
-    try {
-      challenge = parseChallenge(challengeHeader)
-    } catch {
-      // Malformed challenge from untrusted server — treat as non-payable
-      return response
-    }
     const origin = extractOrigin(input)
 
-    // Serialise the payment decision + construction
-    return mutex(async () => {
-      const rl = await ensureInitialised()
-
-      // Resolve per-site policy (may prompt on first visit)
-      const sitePolicy = await resolveSitePolicy(origin, limits, twoFactor)
-      if (sitePolicy.action === "block") return response
-
-      // Persist new site policy if it was just created
-      if (!limits.sitePolicies[origin]) {
-        limits.sitePolicies[origin] = sitePolicy
-        await storage.saveSitePolicies(limits.sitePolicies)
+    // Protocol detection: X402-Challenge takes priority over BRC-105
+    const challengeHeader = response.headers.get("X402-Challenge")
+    if (challengeHeader) {
+      let challenge: Challenge
+      try {
+        challenge = parseChallenge(challengeHeader)
+      } catch {
+        // Malformed challenge from untrusted server — treat as non-payable
+        return response
       }
 
-      // Rate limit check
-      const result: LimitCheckResult = rl.check(challenge, origin)
-
-      if (result.action === "block") {
-        if (result.severity === "trip") {
-          rl.trip()
-          await persist(rl)
-          config.onLimitReached?.(result.reason)
-          return response
-        }
-
-        // Window blocks can be overridden with 2FA (one-shot exception)
-        if (result.severity === "window" && twoFactor) {
-          config.onLimitReached?.(result.reason)
-          const override = await twoFactor.verify({
-            type: "limit-override",
-            amount: challenge.amount,
-            origin,
-            reason: result.reason,
-          })
-          if (override) {
-            // User approved — proceed with this one payment
-          } else {
-            return response
-          }
-        } else {
-          config.onLimitReached?.(result.reason)
-          return response
-        }
-      }
-
-      if (result.action === "yellow-light") {
-        const proceed = config.onYellowLight
-          ? await config.onYellowLight(result.detail)
-          : false
-        if (!proceed) return response
-      }
-
-      // 2FA for high-value tx
-      if (limits.require2fa.onHighValueTx && challenge.amount > limits.require2fa.highValueThreshold) {
-        if (!twoFactor) return response // no provider → block
-        const verified = await twoFactor.verify({
-          type: "high-value-tx",
-          amount: challenge.amount,
+      return handlePaymentFlow(
+        response, input, init, origin,
+        challenge.amount, "x402",
+        async () => constructProof(challenge),
+        (proof) => {
+          const headers = new Headers(init?.headers)
+          headers.set("X402-Proof", JSON.stringify(proof))
+          return fetch(input, { ...init, headers })
+        },
+        (proof) => ({
+          timestamp: nowFn(),
           origin,
-        })
-        if (!verified) return response
+          satoshis: challenge.amount,
+          txid: (proof as Proof).txid,
+        }),
+      )
+    }
+
+    // BRC-105 protocol: x-bsv-payment-version header present
+    const brc105Version = response.headers.get("x-bsv-payment-version")
+    if (brc105Version) {
+      // No BRC-105 wallet or proof constructor configured — pass through silently
+      if (!brc105ProofConstructor && !brc105Wallet) return response
+
+      let brc105Challenge: Brc105Challenge
+      try {
+        brc105Challenge = parseBrc105Challenge(response)
+      } catch {
+        // Malformed or unsupported version — treat as non-payable
+        return response
       }
 
-      // Construct proof and retry
-      const proof = await constructProof(challenge)
+      return handlePaymentFlow(
+        response, input, init, origin,
+        brc105Challenge.satoshisRequired, "brc105",
+        async () => {
+          if (brc105ProofConstructor) {
+            return brc105ProofConstructor(brc105Challenge)
+          }
+          return constructBrc105Proof(brc105Challenge, brc105Wallet!)
+        },
+        (proof) => {
+          const headers = new Headers(init?.headers)
+          headers.set("x-bsv-payment", JSON.stringify(proof))
+          return fetch(input, { ...init, headers })
+        },
+        (proof) => ({
+          timestamp: nowFn(),
+          origin,
+          satoshis: brc105Challenge.satoshisRequired,
+          txid: (proof as import("./types").Brc105Proof).txid,
+          protocol: "brc105" as const,
+        }),
+      )
+    }
 
-      // Record the payment
-      rl.record({
-        timestamp: nowFn(),
-        origin,
-        satoshis: challenge.amount,
-        txid: proof.txid,
-      })
-      await persist(rl)
-
-      const headers = new Headers(init?.headers)
-      headers.set("X402-Proof", JSON.stringify(proof))
-      return fetch(input, { ...init, headers })
-    })
+    // Neither protocol header present — pass through
+    return response
   }
 
   fetchFn.resetLimits = async () => {

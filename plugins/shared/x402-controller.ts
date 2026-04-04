@@ -2,13 +2,14 @@
 
 import { ExtensionStorageAdapter } from './storage-bridge'
 import { RateLimiter, resolveSpendLimits } from '../../src/limits'
-import type { Challenge, LimitCheckResult, SpendMode, TierName } from '../../src/types'
+import type { SpendCheckable } from '../../src/limits'
+import type { LimitCheckResult, SpendMode, TierName } from '../../src/types'
 
 // ---------------------------------------------------------------------------
-// x402 spending limits controller
+// Spending limits controller
 //
 // Owns tier configuration, the rate limiter, and spend-limit storage.
-// This is purely an x402 concern — no wallet operations.
+// Protocol-agnostic — accepts both x402 Challenges and PaymentRequests.
 // ---------------------------------------------------------------------------
 
 let currentTier: TierName = 'Hey, Not Too Rough'
@@ -29,10 +30,10 @@ async function persistLimiter(rl: RateLimiter): Promise<void> {
   await storage.save(rl.getState())
 }
 
-/** Check spend limits before a payment. */
-export async function checkSpendLimits(challenge: Challenge, origin: string): Promise<{ allowed: boolean; reason?: string }> {
+/** Check spend limits before a payment. Accepts either a Challenge or PaymentRequest. */
+export async function checkSpendLimits(request: SpendCheckable, origin: string): Promise<{ allowed: boolean; reason?: string }> {
   const rl = await ensureLimiter()
-  const result: LimitCheckResult = rl.check(challenge, origin)
+  const result: LimitCheckResult = rl.check(request, origin)
 
   if (result.action === 'allow') return { allowed: true }
   if (result.action === 'yellow-light') {

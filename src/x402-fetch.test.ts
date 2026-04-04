@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createX402Fetch, payeeAddressToLockingScript } from "./x402-fetch"
-import type { LimitState, SitePolicy, StorageAdapter } from "./types"
+import type { Brc105Challenge, Brc105Proof, LimitState, SitePolicy, StorageAdapter } from "./types"
 
 const NOW = 1_700_000_000_000
 
@@ -354,5 +354,257 @@ describe("payeeAddressToLockingScript", () => {
     // 3-prefixed addresses are P2SH (version 0x05), not P2PKH
     expect(() => payeeAddressToLockingScript("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"))
       .toThrow("Unsupported address version")
+  })
+})
+
+// === BRC-105 tests ===
+
+function makeBrc105Response(
+  satoshis: number = 1000,
+  overrides: Record<string, string> = {},
+) {
+  const headers: Record<string, string> = {
+    "x-bsv-payment-version": "1.0",
+    "x-bsv-payment-satoshis-required": String(satoshis),
+    "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    "x-bsv-payment-derivation-prefix": "test-prefix",
+    ...overrides,
+  }
+  return new Response("Payment Required", {
+    status: 402,
+    headers,
+  })
+}
+
+function mockBrc105ProofConstructor(): (challenge: Brc105Challenge) => Promise<Brc105Proof> {
+  return vi.fn(async (challenge: Brc105Challenge) => ({
+    derivationPrefix: challenge.derivationPrefix,
+    derivationSuffix: "mock-suffix",
+    transaction: "bW9jay10eA==", // "mock-tx" in base64
+    txid: "brc105-mock-txid",
+  }))
+}
+
+describe("createX402Fetch — BRC-105", () => {
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it("retries with x-bsv-payment header on valid BRC-105 402", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const proofConstructor = mockBrc105ProofConstructor()
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: proofConstructor,
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+    expect(proofConstructor).toHaveBeenCalledOnce()
+
+    // Verify the retry request has x-bsv-payment header
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const paymentHeader = retryHeaders.get("x-bsv-payment")
+    expect(paymentHeader).toBeTruthy()
+
+    const proof = JSON.parse(paymentHeader!)
+    expect(proof).toHaveProperty("derivationPrefix")
+    expect(proof).toHaveProperty("derivationSuffix")
+    expect(proof).toHaveProperty("transaction")
+  })
+
+  it("blocks BRC-105 402 exceeding per-tx limit", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(999_999_999))
+    const onLimitReached = vi.fn()
+
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      onLimitReached,
+      brc105ProofConstructor: mockBrc105ProofConstructor(),
+    })
+
+    const res = await f("https://api.example.com/expensive")
+    expect(res.status).toBe(402)
+    expect(onLimitReached).toHaveBeenCalledOnce()
+  })
+
+  it("triggers yellow-light on BRC-105 402 approaching limits", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(90_000))
+    const onYellowLight = vi.fn().mockResolvedValue(false)
+
+    const f = createX402Fetch({
+      storage: mockStorage(),
+      now: () => NOW,
+      onYellowLight,
+      brc105ProofConstructor: mockBrc105ProofConstructor(),
+      limits: {
+        windows: [{ window: "hour", maxSatoshis: 100_000, maxTransactions: 100 }],
+        perTxMaxSatoshis: 100_000,
+        yellowLightThreshold: 0.5,
+        requirePerSitePrompt: false,
+      },
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(onYellowLight).toHaveBeenCalledOnce()
+    expect(res.status).toBe(402) // Blocked because callback returned false
+  })
+
+  it("blocks BRC-105 402 after circuit breaker trips", async () => {
+    const storage = mockStorage()
+    const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock", rawTx: "00" })
+    const brc105Proof = mockBrc105ProofConstructor()
+
+    const f = createX402Fetch({
+      tier: "Nightmare!",
+      nightmareConfirmation: "NIGHTMARE",
+      storage,
+      proofConstructor,
+      brc105ProofConstructor: brc105Proof,
+      now: () => NOW,
+    })
+
+    // Trip the circuit breaker via custom protocol payments
+    for (let i = 0; i < 11; i++) {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(make402Response(999_000_000))
+        .mockResolvedValueOnce(make200Response())
+      await f("https://api.example.com/big")
+    }
+    globalThis.fetch = vi.fn().mockResolvedValue(make402Response(1))
+    await f("https://api.example.com/trip")
+    expect(f.getState().circuitBroken).toBe(true)
+
+    // Now a BRC-105 payment should also be blocked
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(1))
+    const res = await f("https://api.example.com/brc105")
+    expect(res.status).toBe(402)
+  })
+
+  it("prefers custom protocol when both X402-Challenge and BRC-105 headers present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "X402-Challenge": JSON.stringify({
+          nonce: "test-nonce",
+          payee: "1TestAddr",
+          amount: 1000,
+          network: "mainnet",
+        }),
+        "x-bsv-payment-version": "1.0",
+        "x-bsv-payment-satoshis-required": "1000",
+        "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "x-bsv-payment-derivation-prefix": "prefix",
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const customProof = vi.fn().mockResolvedValue({ txid: "custom-txid", rawTx: "00" })
+    const brc105Proof = mockBrc105ProofConstructor()
+
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      proofConstructor: customProof,
+      brc105ProofConstructor: brc105Proof,
+    })
+
+    await f("https://api.example.com/both")
+
+    // Custom protocol should have been used, not BRC-105
+    expect(customProof).toHaveBeenCalledOnce()
+    expect(brc105Proof).not.toHaveBeenCalled()
+
+    // Retry should use X402-Proof header, not x-bsv-payment
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("X402-Proof")).toBeTruthy()
+    expect(retryHeaders.get("x-bsv-payment")).toBeNull()
+  })
+
+  it("passes through BRC-105 402 with unsupported version", async () => {
+    const badVersion = makeBrc105Response(1000, { "x-bsv-payment-version": "2.0" })
+    globalThis.fetch = vi.fn().mockResolvedValue(badVersion)
+
+    const brc105Proof = mockBrc105ProofConstructor()
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: brc105Proof,
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(brc105Proof).not.toHaveBeenCalled()
+  })
+
+  it("passes through BRC-105 402 when no wallet or proof constructor configured", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(1000))
+
+    const f = createX402Fetch({
+      storage: mockStorage(),
+      now: () => NOW,
+      // No brc105ProofConstructor or brc105Wallet
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+  })
+
+  it("records BRC-105 payment in ledger with protocol: 'brc105'", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(5000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: mockBrc105ProofConstructor(),
+    })
+
+    await f("https://api.example.com/data")
+
+    const state = f.getState()
+    expect(state.entries).toHaveLength(1)
+
+    const entry = state.entries[0] as { protocol?: string; satoshis: number }
+    expect(entry.protocol).toBe("brc105")
+    expect(entry.satoshis).toBe(5000)
+  })
+
+  it("returns original 402 when proof construction throws", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(1000))
+
+    const failingProof = vi.fn().mockRejectedValue(new Error("Wallet declined"))
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: failingProof,
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(failingProof).toHaveBeenCalledOnce()
   })
 })

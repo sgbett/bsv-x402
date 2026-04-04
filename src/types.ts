@@ -12,6 +12,42 @@ export interface Proof {
   rawTx: string
 }
 
+// === BRC-105 payment protocol ===
+
+export interface Brc105Challenge {
+  version: string
+  satoshisRequired: number
+  serverIdentityKey: string
+  derivationPrefix: string
+}
+
+/** Minimal wallet interface for BRC-105 proof construction.
+ *  Works with both CWIInterface (page context) and WalletInterface (SDK). */
+export interface Brc105Wallet {
+  getPublicKey(params: { protocolID: [number, string]; keyID: string; counterparty: string }): Promise<{ publicKey: string }>
+  createHmac(params: { data: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ hmac: number[] }>
+  createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
+}
+
+export interface Brc105Proof {
+  derivationPrefix: string
+  derivationSuffix: string
+  transaction: string  // base64-encoded
+  txid: string         // from wallet createAction result
+}
+
+export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105Proof>
+
+// === Protocol-agnostic payment request ===
+
+export type PaymentProtocol = 'x402' | 'brc105'
+
+export interface PaymentRequest {
+  amount: number
+  origin: string
+  protocol: PaymentProtocol
+}
+
 // === Spending limits ===
 
 export type SpendMode = "interactive" | "programmatic"
@@ -72,6 +108,8 @@ export interface X402Config {
   storage?: StorageAdapter
   twoFactorProvider?: TwoFactorProvider
   proofConstructor?: (challenge: Challenge) => Promise<Proof>
+  brc105ProofConstructor?: Brc105ProofConstructor
+  brc105Wallet?: Brc105Wallet
   nightmareConfirmation?: string
   onLimitReached?: (reason: string) => void
   onYellowLight?: (detail: YellowLightEvent) => Promise<boolean>
@@ -85,7 +123,7 @@ export interface YellowLightEvent {
   currentSpend: number
   limit: number
   window: TimeWindow
-  challenge: Challenge
+  challenge: Challenge | PaymentRequest
 }
 
 export interface LedgerEntry {
@@ -93,6 +131,7 @@ export interface LedgerEntry {
   origin: string
   satoshis: number
   txid: string
+  protocol?: PaymentProtocol
 }
 
 export interface LimitState {
@@ -123,6 +162,7 @@ export interface CWICreateActionOutput {
   satoshis: number
   lockingScript: string
   description?: string
+  customInstructions?: string
 }
 
 export interface CWICreateActionParams {
@@ -132,12 +172,14 @@ export interface CWICreateActionParams {
   options?: {
     returnTXIDOnly?: boolean
     noSend?: boolean
+    randomizeOutputs?: boolean
   }
 }
 
 export interface CWICreateActionResult {
   txid: string
   rawTx?: string
+  tx?: number[]
 }
 
 /**

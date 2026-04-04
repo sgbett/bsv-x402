@@ -123,10 +123,14 @@ chrome.runtime.onMessage.addListener(
       return true
     }
 
-    // Route internal messages from popup / setup UI — must NOT come from
-    // content scripts (sender.tab is set) or other extensions
+    // Route internal messages from popup / setup UI — must come from our
+    // own extension (same extension ID + extension origin URL).  Extension
+    // pages opened as tabs (e.g. wallet/setup.html) have sender.tab set,
+    // so we cannot reject on that alone.
     if (isInternalMessage(message)) {
-      if (sender.tab !== undefined || sender.id !== chrome.runtime.id) {
+      const isOwnExtension = sender.id === chrome.runtime.id
+        && (!sender.url || sender.url.startsWith(chrome.runtime.getURL('')))
+      if (!isOwnExtension) {
         sendResponse({ id: '', status: 'error', error: 'Unauthorised sender' })
         return true
       }

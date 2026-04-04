@@ -46,24 +46,35 @@ document.addEventListener(CWI_REQUEST_EVENT, (evt: Event) => {
     origin: window.location.origin,
   };
 
-  chrome.runtime.sendMessage(message, (response: CWIResponse | undefined) => {
-    // Handle connection errors (e.g., background not ready).
-    if (chrome.runtime.lastError || !response) {
-      const errorResponse: CWIResponse = {
-        id: request.id,
-        status: 'error',
-        error: chrome.runtime.lastError?.message ?? 'No response from background',
-      };
-      document.dispatchEvent(
-        new CustomEvent(CWI_RESPONSE_EVENT, { detail: errorResponse }),
-      );
-      return;
-    }
+  try {
+    chrome.runtime.sendMessage(message, (response: CWIResponse | undefined) => {
+      // Handle connection errors (e.g., background not ready).
+      if (chrome.runtime.lastError || !response) {
+        const errorResponse: CWIResponse = {
+          id: request.id,
+          status: 'error',
+          error: chrome.runtime.lastError?.message ?? 'No response from background',
+        };
+        document.dispatchEvent(
+          new CustomEvent(CWI_RESPONSE_EVENT, { detail: errorResponse }),
+        );
+        return;
+      }
 
+      document.dispatchEvent(
+        new CustomEvent(CWI_RESPONSE_EVENT, { detail: response }),
+      );
+    });
+  } catch {
+    const errorResponse: CWIResponse = {
+      id: request.id,
+      status: 'error',
+      error: 'Extension context invalidated',
+    };
     document.dispatchEvent(
-      new CustomEvent(CWI_RESPONSE_EVENT, { detail: response }),
+      new CustomEvent(CWI_RESPONSE_EVENT, { detail: errorResponse }),
     );
-  });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -73,20 +84,32 @@ document.addEventListener(CWI_REQUEST_EVENT, (evt: Event) => {
 const indicator = new SpendIndicator();
 
 function fetchAndUpdateIndicator(): void {
-  chrome.runtime.sendMessage({ type: 'getSpendStatus' }, (response) => {
-    if (chrome.runtime.lastError || !response) return;
-    indicator.update(response as SpendStatus);
-  });
+  try {
+    chrome.runtime.sendMessage({ type: 'getSpendStatus' }, (response) => {
+      if (chrome.runtime.lastError || !response) return;
+      indicator.update(response as SpendStatus);
+    });
+  } catch {
+    // Extension context invalidated (e.g. service worker restarted).
+    // Stop polling — the new content script will take over after page reload.
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+    indicator.unmount();
+  }
 }
 
 // Mount indicator once DOM is ready; only poll when visible
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
 function mountIndicator(): void {
   chrome.storage.local.get('x402_indicator_mode', (result) => {
     const mode = (result.x402_indicator_mode as IndicatorMode) ?? 'bar';
     indicator.mount(mode);
     if (mode !== 'hidden') {
       fetchAndUpdateIndicator();
-      setInterval(fetchAndUpdateIndicator, 3000);
+      pollTimer = setInterval(fetchAndUpdateIndicator, 3000);
     }
   });
 }

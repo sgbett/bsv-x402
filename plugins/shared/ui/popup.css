@@ -119,10 +119,28 @@ label {
 }
 .setup-btn:hover { opacity: 0.85; }
 
+.unlock-form { margin-bottom: 8px; }
+.unlock-input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+}
+.unlock-input:focus { border-color: #00d4aa; }
+.unlock-error {
+  color: #f06060;
+  font-size: 12px;
+  margin-top: 4px;
+  min-height: 0;
+}
+
 footer {
   text-align: center;
   padding-top: 8px;
   border-top: 1px solid #2a2a4a;
 }
-footer a { color: #00d4aa; text-decoration: none; font-size: 12px; }
-footer a:hover { text-decoration: underline; }
+.footer-text { color: #555; font-size: 12px; }
