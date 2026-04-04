@@ -77,16 +77,42 @@ describe("parseBrc105Challenge", () => {
     }))).toThrow("positive integer")
   })
 
+  it("accepts x-bsv-payment-identity-key as fallback (no-auth mode)", () => {
+    const { "x-bsv-auth-identity-key": _, ...rest } = VALID_HEADERS
+    const c = parseBrc105Challenge(makeResponse({
+      ...rest,
+      "x-bsv-payment-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    }))
+    expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+  })
+
+  it("falls back to payment header when auth header is empty", () => {
+    const c = parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-auth-identity-key": "",
+      "x-bsv-payment-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    }))
+    expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+  })
+
+  it("prefers x-bsv-auth-identity-key when both are present", () => {
+    const c = parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-payment-identity-key": "0379be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    }))
+    expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+  })
+
   it("rejects missing identity key header", () => {
     const { "x-bsv-auth-identity-key": _, ...rest } = VALID_HEADERS
-    expect(() => parseBrc105Challenge(makeResponse(rest))).toThrow("missing or empty x-bsv-auth-identity-key")
+    expect(() => parseBrc105Challenge(makeResponse(rest))).toThrow("missing identity key")
   })
 
   it("rejects empty identity key", () => {
     expect(() => parseBrc105Challenge(makeResponse({
       ...VALID_HEADERS,
       "x-bsv-auth-identity-key": "",
-    }))).toThrow("missing or empty x-bsv-auth-identity-key")
+    }))).toThrow("missing identity key")
   })
 
   it("rejects identity key that is not a compressed public key", () => {
