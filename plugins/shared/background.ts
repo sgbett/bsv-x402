@@ -22,7 +22,7 @@ function hexToBytes(hex: string): Uint8Array {
 async function hash160(data: Uint8Array): Promise<Uint8Array> {
   // Import ripemd160 inline to avoid circular deps — same impl as brc105-proof.ts
   const { ripemd160 } = await import('../../src/brc105-proof')
-  const sha256 = new Uint8Array(await crypto.subtle.digest('SHA-256', data))
+  const sha256 = new Uint8Array(await crypto.subtle.digest('SHA-256', data as ArrayBufferView<ArrayBuffer>))
   return ripemd160(sha256)
 }
 
@@ -36,8 +36,8 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
   payload.set(pubkeyHash, 1)
 
   // Double-SHA256 checksum (first 4 bytes)
-  const hash1 = new Uint8Array(await crypto.subtle.digest('SHA-256', payload))
-  const hash2 = new Uint8Array(await crypto.subtle.digest('SHA-256', hash1))
+  const hash1 = new Uint8Array(await crypto.subtle.digest('SHA-256', payload as ArrayBufferView<ArrayBuffer>))
+  const hash2 = new Uint8Array(await crypto.subtle.digest('SHA-256', hash1 as ArrayBufferView<ArrayBuffer>))
   const checksum = hash2.slice(0, 4)
 
   // Concatenate payload + checksum
