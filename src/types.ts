@@ -113,6 +113,7 @@ export interface X402Config {
   nightmareConfirmation?: string
   onLimitReached?: (reason: string) => void
   onYellowLight?: (detail: YellowLightEvent) => Promise<boolean>
+  onProofError?: (error: unknown, protocol: PaymentProtocol) => void
   now?: () => number
 }
 
