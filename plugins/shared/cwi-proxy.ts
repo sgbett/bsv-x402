@@ -1,7 +1,7 @@
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import type { WalletBackend } from './wallet-backend'
 import { checkSpendLimits, recordPayment, getSpendStatus } from './x402-controller'
-import type { Challenge } from '../../src/types'
+import type { PaymentRequest } from '../../src/types'
 
 // ---------------------------------------------------------------------------
 // CWI proxy — spending limits middleware before wallet backend calls
@@ -43,14 +43,13 @@ export async function handleCWIRequest(
       }
       validatedSatoshis = total
 
-      const challenge: Challenge = {
-        nonce: request.id,
-        payee: '',
+      const paymentRequest: PaymentRequest = {
         amount: validatedSatoshis,
-        network: 'main',
+        origin,
+        protocol: 'x402',
       }
 
-      const limitCheck = await checkSpendLimits(challenge, origin)
+      const limitCheck = await checkSpendLimits(paymentRequest, origin)
       if (!limitCheck.allowed) {
         return { id: request.id, status: 'error', error: limitCheck.reason ?? 'Spending limit exceeded' }
       }

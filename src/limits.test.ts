@@ -6,7 +6,7 @@ import {
   TIER_PRESETS,
   resolveSpendLimits,
 } from "./limits"
-import type { Challenge, LedgerEntry, SpendLimits } from "./types"
+import type { Challenge, LedgerEntry, PaymentRequest, SpendLimits } from "./types"
 
 const NOW = 1_700_000_000_000
 
@@ -243,5 +243,139 @@ describe("TIER_PRESETS", () => {
 
   it("Nightmare has no window limits", () => {
     expect(TIER_PRESETS["Nightmare!"].interactive.windows).toHaveLength(0)
+  })
+})
+
+// === PaymentRequest support ===
+
+function paymentRequest(amount: number, protocol: 'x402' | 'brc105' = 'x402'): PaymentRequest {
+  return { amount, origin: "https://example.com", protocol }
+}
+
+describe("RateLimiter with PaymentRequest", () => {
+  describe("check", () => {
+    it("allows a PaymentRequest within limits", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      const result = limiter.check(paymentRequest(100_000), "https://example.com")
+      expect(result.action).toBe("allow")
+    })
+
+    it("blocks a PaymentRequest exceeding per-tx max", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      const result = limiter.check(paymentRequest(600_000), "https://example.com")
+      expect(result.action).toBe("block")
+      if (result.action === "block") {
+        expect(result.reason).toContain("per-tx")
+      }
+    })
+
+    it("enforces window limits identically to Challenge", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      limiter.record(entry(900_000, 30))
+      // PaymentRequest should be blocked just like a Challenge would be
+      const result = limiter.check(paymentRequest(200_000), "https://example.com")
+      expect(result.action).toBe("block")
+    })
+
+    it("returns yellow-light for PaymentRequest approaching limit", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      limiter.record(entry(750_000, 30))
+      const result = limiter.check(paymentRequest(100_000), "https://example.com")
+      expect(result.action).toBe("yellow-light")
+      if (result.action === "yellow-light") {
+        expect(result.detail.challenge).toEqual(paymentRequest(100_000))
+      }
+    })
+
+    it("blocks BRC-105 PaymentRequest exceeding BFG ceiling", () => {
+      const nightmareLimits = simpleLimits({
+        windows: [],
+        perTxMaxSatoshis: BFG_PER_TX_CEILING_SATOSHIS,
+      })
+      const limiter = new RateLimiter(nightmareLimits, undefined, () => NOW)
+      const result = limiter.check(
+        paymentRequest(BFG_PER_TX_CEILING_SATOSHIS + 1, "brc105"),
+        "https://example.com",
+      )
+      expect(result.action).toBe("block")
+      if (result.action === "block") {
+        expect(result.reason).toContain("BFG per-tx")
+      }
+    })
+  })
+
+  describe("mixed protocol entries", () => {
+    it("sums x402 and brc105 entries in the same window", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      // Record an x402 entry
+      limiter.record({ ...entry(400_000, 30), protocol: "x402" })
+      // Record a brc105 entry
+      limiter.record({ ...entry(400_000, 20), protocol: "brc105" })
+      // Total is 800k — adding 300k should exceed the 1M hourly limit
+      const result = limiter.check(paymentRequest(300_000, "brc105"), "https://example.com")
+      expect(result.action).toBe("block")
+    })
+
+    it("counts mixed protocol entries towards tx count limits", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      // Fill up to the tx count limit with mixed protocols
+      for (let i = 0; i < 5; i++) {
+        limiter.record({ ...entry(1_000, 30), protocol: "x402" })
+      }
+      for (let i = 0; i < 5; i++) {
+        limiter.record({ ...entry(1_000, 20), protocol: "brc105" })
+      }
+      // 10 txs recorded — next one should be blocked
+      const result = limiter.check(paymentRequest(1_000), "https://example.com")
+      expect(result.action).toBe("block")
+      if (result.action === "block") {
+        expect(result.reason).toContain("tx count")
+      }
+    })
+  })
+
+  describe("LedgerEntry backwards compatibility", () => {
+    it("loads entries without protocol field gracefully", () => {
+      const oldEntries: LedgerEntry[] = [
+        { timestamp: NOW - 30 * 60_000, origin: "https://example.com", satoshis: 100_000, txid: "tx-old" },
+      ]
+      const state = { entries: oldEntries, circuitBroken: false, hmac: "" }
+      const limiter = new RateLimiter(simpleLimits(), state, () => NOW)
+
+      // Old entries should still count towards limits
+      const result = limiter.check(paymentRequest(950_000), "https://example.com")
+      expect(result.action).toBe("block")
+    })
+
+    it("persists and loads entries with protocol field", () => {
+      const limiter = new RateLimiter(simpleLimits(), undefined, () => NOW)
+      limiter.record({ ...entry(50_000, 10), protocol: "brc105" })
+
+      const state = limiter.getState()
+      expect(state.entries[0].protocol).toBe("brc105")
+
+      // Reload from state
+      const limiter2 = new RateLimiter(simpleLimits(), state, () => NOW)
+      const state2 = limiter2.getState()
+      expect(state2.entries[0].protocol).toBe("brc105")
+    })
+
+    it("mixes old entries (no protocol) with new entries (with protocol)", () => {
+      const oldEntry: LedgerEntry = {
+        timestamp: NOW - 30 * 60_000,
+        origin: "https://example.com",
+        satoshis: 400_000,
+        txid: "tx-legacy",
+      }
+      const state = { entries: [oldEntry], circuitBroken: false, hmac: "" }
+      const limiter = new RateLimiter(simpleLimits(), state, () => NOW)
+
+      // Add a new entry with protocol
+      limiter.record({ ...entry(400_000, 10), protocol: "brc105" })
+
+      // Total is 800k — adding 300k should exceed the 1M hourly limit
+      const result = limiter.check(paymentRequest(300_000), "https://example.com")
+      expect(result.action).toBe("block")
+    })
   })
 })

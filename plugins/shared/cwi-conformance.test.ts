@@ -473,7 +473,148 @@ describe('CWI conformance: spending limits', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 5. Error handling — backend errors are wrapped properly
+// 5. BRC-105 proof construction flow
+//
+// Verifies that the three-step BRC-105 sequence (createHmac → getPublicKey →
+// createAction) works through the CWI proxy with correct spending-control
+// behaviour: only createAction is gated.
+// ---------------------------------------------------------------------------
+
+describe('CWI conformance: BRC-105 proof construction flow', () => {
+  it('createHmac with protocolID [2, "server hmac"] passes through without spending check', async () => {
+    const msg = makeMessage('createHmac', {
+      data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      protocolID: [2, 'server hmac'],
+      keyID: 'test-key',
+      counterparty: 'self',
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('ok')
+    expect(response.result).toHaveProperty('hmac')
+    expect(mockCheckSpendLimits).not.toHaveBeenCalled()
+    expect(mockRecordPayment).not.toHaveBeenCalled()
+  })
+
+  it('getPublicKey with counterparty and protocolID [2, "3241645161d8"] passes through without spending check', async () => {
+    const msg = makeMessage('getPublicKey', {
+      protocolID: [2, '3241645161d8'],
+      keyID: 'some-prefix some-suffix',
+      counterparty: '02abc123serveridentitykey',
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('ok')
+    expect(response.result).toHaveProperty('publicKey')
+    expect(mockCheckSpendLimits).not.toHaveBeenCalled()
+    expect(mockRecordPayment).not.toHaveBeenCalled()
+  })
+
+  it('createAction with BRC-105-shaped params (customInstructions, randomizeOutputs: false) is subject to spending limits', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'BRC-105 payment',
+      outputs: [{
+        satoshis: 250,
+        lockingScript: '76a914aabbccdd88ac',
+        description: 'BRC-105 payment output',
+        customInstructions: JSON.stringify({
+          derivationPrefix: 'test-prefix',
+          derivationSuffix: 'test-suffix',
+          payee: '02abc123serveridentitykey',
+        }),
+      }],
+      options: {
+        randomizeOutputs: false,
+      },
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('ok')
+    expect(response.result).toHaveProperty('txid')
+    expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
+    expect(mockCheckSpendLimits.mock.calls[0][0].amount).toBe(250)
+    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 250, 'deadbeef')
+  })
+
+  it('createAction with BRC-105 params is blocked when spending limit exceeded', async () => {
+    mockCheckSpendLimits.mockResolvedValueOnce({ allowed: false, reason: 'Per-transaction limit exceeded' })
+
+    const msg = makeMessage('createAction', {
+      description: 'BRC-105 payment',
+      outputs: [{
+        satoshis: 50000,
+        lockingScript: '76a914aabbccdd88ac',
+        description: 'BRC-105 payment output',
+        customInstructions: JSON.stringify({
+          derivationPrefix: 'prefix',
+          derivationSuffix: 'suffix',
+          payee: '02server',
+        }),
+      }],
+      options: { randomizeOutputs: false },
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('error')
+    expect(response.error).toContain('Per-transaction limit exceeded')
+    expect(backend.calls).toHaveLength(0)
+  })
+
+  it('full BRC-105 sequence (createHmac → getPublicKey → createAction) works end-to-end', async () => {
+    // Step 1: createHmac for nonce generation
+    const hmacMsg = makeMessage('createHmac', {
+      data: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+      protocolID: [2, 'server hmac'],
+      keyID: 'nonce-key',
+      counterparty: 'self',
+    })
+    const hmacResponse = await handleCWIRequest(hmacMsg, backend)
+    expect(hmacResponse.status).toBe('ok')
+    expect(hmacResponse.result).toHaveProperty('hmac')
+
+    // Step 2: getPublicKey for BRC-29 key derivation
+    const keyMsg = makeMessage('getPublicKey', {
+      protocolID: [2, '3241645161d8'],
+      keyID: 'derivation-prefix derived-suffix',
+      counterparty: '02serveridentitykey',
+    })
+    const keyResponse = await handleCWIRequest(keyMsg, backend)
+    expect(keyResponse.status).toBe('ok')
+    expect(keyResponse.result).toHaveProperty('publicKey')
+
+    // Step 3: createAction with the derived locking script
+    const actionMsg = makeMessage('createAction', {
+      description: 'BRC-105 payment',
+      outputs: [{
+        satoshis: 100,
+        lockingScript: '76a914aabbccdd88ac',
+        description: 'BRC-105 payment output',
+        customInstructions: JSON.stringify({
+          derivationPrefix: 'derivation-prefix',
+          derivationSuffix: 'derived-suffix',
+          payee: '02serveridentitykey',
+        }),
+      }],
+      options: { randomizeOutputs: false },
+    })
+    const actionResponse = await handleCWIRequest(actionMsg, backend)
+    expect(actionResponse.status).toBe('ok')
+    expect(actionResponse.result).toHaveProperty('txid')
+
+    // Verify: only createAction triggered spending controls
+    expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
+    expect(mockRecordPayment).toHaveBeenCalledTimes(1)
+
+    // Verify all three calls reached the backend in order
+    expect(backend.calls).toHaveLength(3)
+    expect(backend.calls[0].method).toBe('createHmac')
+    expect(backend.calls[1].method).toBe('getPublicKey')
+    expect(backend.calls[2].method).toBe('createAction')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 6. Error handling — backend errors are wrapped properly
 // ---------------------------------------------------------------------------
 
 describe('CWI conformance: error handling', () => {
@@ -495,7 +636,7 @@ describe('CWI conformance: error handling', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 6. CWIMethodName type completeness — compile-time check
+// 7. CWIMethodName type completeness — compile-time check
 // ---------------------------------------------------------------------------
 
 describe('CWI conformance: CWIMethodName type completeness', () => {
