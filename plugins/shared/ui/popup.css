@@ -119,6 +119,35 @@ label {
 }
 .setup-btn:hover { opacity: 0.85; }
 
+.address-section { margin-bottom: 14px; }
+.address-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #16213e;
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.address-text {
+  flex: 1;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #ccc;
+  word-break: break-all;
+  user-select: all;
+}
+.copy-btn {
+  background: #2a2a4a;
+  border: none;
+  color: #e0e0e0;
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.copy-btn:hover { background: #00d4aa; color: #1a1a2e; }
+
 .unlock-form { margin-bottom: 8px; }
 .unlock-input {
   width: 100%;
