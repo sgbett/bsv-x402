@@ -607,4 +607,40 @@ describe("createX402Fetch — BRC-105", () => {
     expect(res.status).toBe(402)
     expect(failingProof).toHaveBeenCalledOnce()
   })
+
+  it("calls onProofError callback when proof construction fails", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(1000))
+
+    const error = new Error("Wallet locked")
+    const onProofError = vi.fn()
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: vi.fn().mockRejectedValue(error),
+      onProofError,
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(onProofError).toHaveBeenCalledOnce()
+    expect(onProofError).toHaveBeenCalledWith(error, "brc105")
+  })
+
+  it("logs proof construction error to console", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc105Response(1000))
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+    const f = createX402Fetch({
+      tier: "I'm Too Young to Die",
+      storage: mockStorage(),
+      now: () => NOW,
+      brc105ProofConstructor: vi.fn().mockRejectedValue(new Error("No funds")),
+    })
+
+    await f("https://api.example.com/data")
+    expect(consoleSpy).toHaveBeenCalledOnce()
+    expect(consoleSpy.mock.calls[0][0]).toContain("brc105")
+    consoleSpy.mockRestore()
+  })
 })

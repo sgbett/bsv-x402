@@ -256,8 +256,9 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       let proof: P
       try {
         proof = await buildProof()
-      } catch {
-        // Proof construction failed — return original 402
+      } catch (err) {
+        console.error(`[x402] Proof construction failed (${protocol}):`, err)
+        config.onProofError?.(err, protocol)
         return originalResponse
       }
 
