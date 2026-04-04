@@ -6,11 +6,70 @@ import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
 
 // ---------------------------------------------------------------------------
+// Pubkey → P2PKH address (for popup display)
+// ---------------------------------------------------------------------------
+
+const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+
+function hexToBytes(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
+  }
+  return bytes
+}
+
+async function hash160(data: Uint8Array): Promise<Uint8Array> {
+  // Import ripemd160 inline to avoid circular deps — same impl as brc105-proof.ts
+  const { ripemd160 } = await import('../../src/brc105-proof')
+  const sha256 = new Uint8Array(await crypto.subtle.digest('SHA-256', data))
+  return ripemd160(sha256)
+}
+
+async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
+  const pubkeyBytes = hexToBytes(pubkeyHex)
+  const pubkeyHash = await hash160(pubkeyBytes)
+
+  // Version byte (0x00 for mainnet) + 20-byte hash
+  const payload = new Uint8Array(21)
+  payload[0] = 0x00
+  payload.set(pubkeyHash, 1)
+
+  // Double-SHA256 checksum (first 4 bytes)
+  const hash1 = new Uint8Array(await crypto.subtle.digest('SHA-256', payload))
+  const hash2 = new Uint8Array(await crypto.subtle.digest('SHA-256', hash1))
+  const checksum = hash2.slice(0, 4)
+
+  // Concatenate payload + checksum
+  const addressBytes = new Uint8Array(25)
+  addressBytes.set(payload)
+  addressBytes.set(checksum, 21)
+
+  // Base58 encode
+  let num = 0n
+  for (const b of addressBytes) num = num * 256n + BigInt(b)
+
+  let encoded = ''
+  while (num > 0n) {
+    encoded = BASE58_ALPHABET[Number(num % 58n)] + encoded
+    num = num / 58n
+  }
+
+  // Preserve leading zero bytes as '1's
+  for (const b of addressBytes) {
+    if (b !== 0) break
+    encoded = '1' + encoded
+  }
+
+  return encoded
+}
+
+// ---------------------------------------------------------------------------
 // Message type guards
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
+  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'getAddress' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
   payload?: unknown
 }
 
@@ -60,6 +119,16 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
 
     case 'getState':
       break // just return composed state below
+
+    case 'getAddress': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const backend = wallet.getBackend()
+      const result = await backend.call('getPublicKey', { identityKey: true }, 'self') as { publicKey: string }
+      const address = await pubkeyToAddress(result.publicKey)
+      const walletState = await wallet.getWalletState()
+      const x402State = x402.getX402State()
+      return { ...walletState, ...x402State, address }
+    }
 
     case 'switchBackend': {
       const payload = message.payload as { type: 'builtin' | 'external'; extensionId?: string } | undefined

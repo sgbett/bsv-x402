@@ -59,6 +59,12 @@ function updateWalletPanel(state: PopupState): void {
 
   balanceEl.textContent =
     state.balance !== undefined ? `${state.balance.toLocaleString()} sats` : "--- sats";
+
+  // Show/hide address section based on unlock state
+  const addressSection = document.getElementById("address-section") as HTMLDivElement | null;
+  if (addressSection) {
+    addressSection.hidden = !state.isUnlocked;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +130,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // Fetch and display wallet address when unlocked
+  async function fetchAddress(): Promise<void> {
+    const addressDisplay = document.getElementById("address-display");
+    if (!addressDisplay) return;
+    try {
+      const result = await sendMessage({ type: "getAddress" }) as PopupState & { address?: string };
+      if (result.address) {
+        addressDisplay.textContent = result.address;
+      }
+    } catch {
+      addressDisplay.textContent = "";
+    }
+  }
+
   // Fetch initial state
   function updateUI(state: PopupState): void {
     updateWalletPanel(state);
@@ -133,6 +153,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     const state = await sendMessage({ type: "getState" });
     updateUI(state);
+    if (state.isUnlocked) fetchAddress();
   } catch {
     updateUI({
       isSetUp: false,
@@ -181,6 +202,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             unlockForm.hidden = true;
             unlockPassword.value = "";
             updateUI(state);
+            fetchAddress();
           } catch (err) {
             if (unlockError) unlockError.textContent = err instanceof Error ? err.message : String(err);
           } finally {
@@ -226,6 +248,31 @@ document.addEventListener("DOMContentLoaded", async () => {
   if (setupBtn) {
     setupBtn.addEventListener("click", () => {
       chrome.tabs.create({ url: chrome.runtime.getURL("ui/wallet/setup.html") });
+    });
+  }
+
+  // Wallet: Copy address
+  const copyAddressBtn = document.getElementById("copy-address-btn");
+  if (copyAddressBtn) {
+    copyAddressBtn.addEventListener("click", async () => {
+      const addressDisplay = document.getElementById("address-display");
+      const text = addressDisplay?.textContent ?? "";
+      if (!text) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        copyAddressBtn.textContent = "Copied!";
+        setTimeout(() => { copyAddressBtn.textContent = "Copy"; }, 1500);
+      } catch {
+        // Fallback for environments where clipboard API is unavailable
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textarea);
+        copyAddressBtn.textContent = "Copied!";
+        setTimeout(() => { copyAddressBtn.textContent = "Copy"; }, 1500);
+      }
     });
   }
 
