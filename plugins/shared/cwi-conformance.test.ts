@@ -460,7 +460,7 @@ describe('CWI conformance: spending limits', () => {
     })
     await handleCWIRequest(msg, backend)
 
-    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 100, 'deadbeef')
+    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 100, 'deadbeef', undefined)
   })
 
   it('non-createAction methods skip spending limits entirely', async () => {
@@ -533,7 +533,7 @@ describe('CWI conformance: BRC-105 proof construction flow', () => {
     expect(response.result).toHaveProperty('txid')
     expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
     expect(mockCheckSpendLimits.mock.calls[0][0].amount).toBe(250)
-    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 250, 'deadbeef')
+    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 250, 'deadbeef', undefined)
   })
 
   it('createAction with BRC-105 params is blocked when spending limit exceeded', async () => {

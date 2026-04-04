@@ -238,6 +238,120 @@ export interface CWIInterface {
   getVersion(params?: object): Promise<{ version: string }>
 }
 
+// === Multi-wallet types ===
+
+/** Unique identifier for a wallet profile. */
+export type WalletId = string
+
+/** How a wallet handles payment confirmations. */
+export type WalletMode = 'manual' | 'auto'
+
+/** Currency code for fiat display (ISO 4217). */
+export type FiatCurrency = 'USD' | 'EUR' | 'GBP' | 'JPY' | 'CAD' | 'AUD' | 'CHF' | 'CNY'
+
+/** URL scope — restricts which origins a wallet can pay. */
+export interface UrlScope {
+  /** Glob patterns for allowed origins (e.g. "https://example.com", "https://*.example.com") */
+  whitelist: string[]
+  /** Glob patterns for blocked origins — takes priority over whitelist. */
+  blacklist: string[]
+}
+
+/** A wallet profile — either manual (click-to-pay) or automated. */
+export interface WalletProfile {
+  id: WalletId
+  name: string
+  mode: WalletMode
+  /** When true, this is the default wallet for unscoped origins. */
+  isDefault: boolean
+  /** Backend type: built-in (local key) or external extension. */
+  backendType: 'builtin' | 'external'
+  /** For external backends, the extension ID to delegate to. */
+  externalExtensionId?: string
+  /** Spending tier for this wallet's limits. */
+  tier: TierName
+  /** Spend mode within the tier. */
+  spendMode: SpendMode
+  /** URL scope — if set, this wallet only activates for matching origins. */
+  urlScope?: UrlScope
+  /** For auto wallets: auto-confirm payments up to this many satoshis. */
+  autoConfirmThreshold?: number
+  /** Preferred fiat currency for display. */
+  fiatCurrency: FiatCurrency
+  /** Created timestamp (ms since epoch). */
+  createdAt: number
+  /** Last modified timestamp (ms since epoch). */
+  updatedAt: number
+}
+
+/** Payment confirmation info shown to the user for manual wallets. */
+export interface PaymentConfirmation {
+  walletId: WalletId
+  walletName: string
+  /** Amount in satoshis. */
+  amount: number
+  /** Fiat equivalent string (e.g. "$0.15 USD"). */
+  fiatAmount?: string
+  /** Current wallet balance in satoshis. */
+  currentBalance?: number
+  /** Current balance in fiat. */
+  currentBalanceFiat?: string
+  /** Balance after payment in satoshis. */
+  balanceAfter?: number
+  /** Balance after payment in fiat. */
+  balanceAfterFiat?: string
+  /** The origin requesting payment. */
+  origin: string
+  /** The payee address or identity key. */
+  payee: string
+}
+
+// === Transaction log / accounting ===
+
+/** A recorded transaction for accounting purposes. */
+export interface TransactionRecord {
+  /** Transaction ID on the blockchain. */
+  txid: string
+  /** When the transaction was created (ms since epoch). */
+  timestamp: number
+  /** Amount in satoshis. */
+  amount: number
+  /** Sender's public key (our wallet). */
+  fromPublicKey: string
+  /** Recipient's public key or address. */
+  toPublicKey: string
+  /** Which wallet profile made this payment. */
+  walletId: WalletId
+  /** Origin that triggered the payment. */
+  origin: string
+  /** Protocol used. */
+  protocol: PaymentProtocol
+  /** Optional human-readable description. */
+  description?: string
+}
+
+/** Cloud sync provider identifier. */
+export type SyncProviderType = 'local' | 'icloud' | 'google' | 'microsoft' | 'merkleworks'
+
+/** Configuration for cloud sync. */
+export interface SyncConfig {
+  provider: SyncProviderType
+  /** Whether sync is currently enabled. */
+  enabled: boolean
+  /** Last successful sync timestamp (ms since epoch). */
+  lastSyncAt?: number
+  /** Provider-specific credentials/tokens (encrypted at rest). */
+  credentials?: Record<string, string>
+}
+
+/** Interface for sync provider implementations. */
+export interface SyncProvider {
+  readonly type: SyncProviderType
+  push(records: TransactionRecord[]): Promise<void>
+  pull(since: number): Promise<TransactionRecord[]>
+  getLastSyncTimestamp(): Promise<number>
+}
+
 // === 2FA ===
 
 export type TwoFactorAction =

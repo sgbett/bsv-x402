@@ -1,9 +1,10 @@
 /// <reference types="chrome" />
 
-import type { LedgerEntry, LimitState, SitePolicy, StorageAdapter } from "../../src/types"
+import type { LedgerEntry, LimitState, SitePolicy, StorageAdapter, TransactionRecord, SyncConfig } from "../../src/types"
+import type { TransactionLogStorage } from "../../src/transaction-log"
 
-const STATE_KEY = "x402_limit_state"
-const POLICIES_KEY = "x402_site_policies"
+const DEFAULT_STATE_KEY = "x402_limit_state"
+const DEFAULT_POLICIES_KEY = "x402_site_policies"
 
 type KeyDeriver = () => Promise<Uint8Array>
 
@@ -31,14 +32,20 @@ function serializeForHmac(state: LimitState): string {
 
 export class ExtensionStorageAdapter implements StorageAdapter {
   private keyDeriver?: KeyDeriver
+  private stateKey: string
+  private policiesKey: string
 
-  constructor(keyDeriver?: KeyDeriver) {
+  constructor(keyDeriver?: KeyDeriver, walletId?: string) {
     this.keyDeriver = keyDeriver
+    // Per-wallet namespacing: x402_limit_state:<walletId>
+    const suffix = walletId ? `:${walletId}` : ''
+    this.stateKey = `${DEFAULT_STATE_KEY}${suffix}`
+    this.policiesKey = `${DEFAULT_POLICIES_KEY}${suffix}`
   }
 
   async load(): Promise<LimitState | null> {
-    const result = await chrome.storage.local.get(STATE_KEY)
-    const raw = result[STATE_KEY]
+    const result = await chrome.storage.local.get(this.stateKey)
+    const raw = result[this.stateKey]
     if (raw == null) return null
 
     let state: LimitState
@@ -80,13 +87,13 @@ export class ExtensionStorageAdapter implements StorageAdapter {
       const key = await this.keyDeriver()
       state.hmac = await computeHmac(serializeForHmac(state), key)
     }
-    await chrome.storage.local.set({ [STATE_KEY]: state })
+    await chrome.storage.local.set({ [this.stateKey]: state })
   }
 
   async loadSitePolicies(): Promise<Record<string, SitePolicy>> {
     const empty: Record<string, SitePolicy> = {}
-    const result = await chrome.storage.local.get(POLICIES_KEY)
-    const raw = result[POLICIES_KEY]
+    const result = await chrome.storage.local.get(this.policiesKey)
+    const raw = result[this.policiesKey]
     if (raw == null) return empty
     try {
       return (typeof raw === "string" ? JSON.parse(raw) : raw) as Record<string, SitePolicy>
@@ -96,6 +103,47 @@ export class ExtensionStorageAdapter implements StorageAdapter {
   }
 
   async saveSitePolicies(policies: Record<string, SitePolicy>): Promise<void> {
-    await chrome.storage.local.set({ [POLICIES_KEY]: policies })
+    await chrome.storage.local.set({ [this.policiesKey]: policies })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Extension transaction log storage (chrome.storage.local)
+// ---------------------------------------------------------------------------
+
+const TX_LOG_KEY = 'x402_tx_log'
+const SYNC_CONFIGS_KEY = 'x402_sync_configs'
+
+export class ExtensionTransactionLogStorage implements TransactionLogStorage {
+  async loadRecords(): Promise<TransactionRecord[]> {
+    const result = await chrome.storage.local.get(TX_LOG_KEY)
+    const raw = result[TX_LOG_KEY]
+    if (raw == null) return []
+    try {
+      const records = typeof raw === 'string' ? JSON.parse(raw) : raw
+      return Array.isArray(records) ? records : []
+    } catch {
+      return []
+    }
+  }
+
+  async saveRecords(records: TransactionRecord[]): Promise<void> {
+    await chrome.storage.local.set({ [TX_LOG_KEY]: records })
+  }
+
+  async loadSyncConfigs(): Promise<SyncConfig[]> {
+    const result = await chrome.storage.local.get(SYNC_CONFIGS_KEY)
+    const raw = result[SYNC_CONFIGS_KEY]
+    if (raw == null) return []
+    try {
+      const configs = typeof raw === 'string' ? JSON.parse(raw) : raw
+      return Array.isArray(configs) ? configs : []
+    } catch {
+      return []
+    }
+  }
+
+  async saveSyncConfigs(configs: SyncConfig[]): Promise<void> {
+    await chrome.storage.local.set({ [SYNC_CONFIGS_KEY]: configs })
   }
 }

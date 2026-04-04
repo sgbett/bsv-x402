@@ -1,13 +1,14 @@
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import type { WalletBackend } from './wallet-backend'
+import type { WalletId } from '../../src/types'
 import { checkSpendLimits, recordPayment, getSpendStatus } from './x402-controller'
 import type { PaymentRequest } from '../../src/types'
 
 // ---------------------------------------------------------------------------
 // CWI proxy — spending limits middleware before wallet backend calls
 //
-// For createAction: extract total satoshis, check spend limits, delegate
-// to the wallet backend, then record the payment on success.
+// For createAction: extract total satoshis, check spend limits for the
+// selected wallet, delegate to the wallet backend, then record payment.
 // All other methods pass straight through.
 // ---------------------------------------------------------------------------
 
@@ -15,6 +16,7 @@ export async function handleCWIRequest(
   message: ContentToBackgroundMessage,
   backend: WalletBackend,
   senderTabId?: number,
+  walletId?: WalletId,
 ): Promise<CWIResponse> {
   const { request } = message
   const origin = message.origin
@@ -49,7 +51,7 @@ export async function handleCWIRequest(
         protocol: 'x402',
       }
 
-      const limitCheck = await checkSpendLimits(paymentRequest, origin)
+      const limitCheck = await checkSpendLimits(paymentRequest, origin, walletId)
       if (!limitCheck.allowed) {
         return { id: request.id, status: 'error', error: limitCheck.reason ?? 'Spending limit exceeded' }
       }
@@ -62,11 +64,11 @@ export async function handleCWIRequest(
     if (request.method === 'createAction' && result != null && validatedSatoshis !== undefined) {
       const actionResult = result as { txid?: string }
       if (actionResult.txid) {
-        await recordPayment(origin, validatedSatoshis, actionResult.txid)
+        await recordPayment(origin, validatedSatoshis, actionResult.txid, walletId)
 
         // Push spend update to the originating tab's indicator
         if (senderTabId !== undefined) {
-          getSpendStatus().then((status) => {
+          getSpendStatus(walletId).then((status) => {
             chrome.tabs.sendMessage(senderTabId, { type: 'spendUpdated', status }, () => {
               // Best-effort update — suppress unchecked lastError warnings
               void chrome.runtime?.lastError

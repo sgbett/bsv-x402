@@ -4,13 +4,28 @@ import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import { handleCWIRequest } from './cwi-proxy'
 import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
+import * as registry from './wallet-registry-controller'
+import { TransactionLog } from '../../src/transaction-log'
+import { ExtensionTransactionLogStorage } from './storage-bridge'
+
+// ---------------------------------------------------------------------------
+// Transaction log (singleton for the extension)
+// ---------------------------------------------------------------------------
+
+const txLog = new TransactionLog(new ExtensionTransactionLogStorage())
 
 // ---------------------------------------------------------------------------
 // Message type guards
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
+  type:
+    | 'unlock' | 'lock' | 'setup' | 'getState' | 'setNetwork' | 'setTier'
+    | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
+    // Multi-wallet messages
+    | 'listWallets' | 'createWallet' | 'updateWallet' | 'removeWallet'
+    | 'selectWallet' | 'getTransactionLog' | 'configureSyncProvider'
+    | 'syncTransactions'
   payload?: unknown
 }
 
@@ -28,21 +43,45 @@ function isCWIMessage(msg: unknown): msg is ContentToBackgroundMessage {
 
 async function handleInternalMessage(message: InternalMessage): Promise<Record<string, unknown>> {
   switch (message.type) {
-    // Wallet concerns
+    // Wallet concerns (now wallet-id-aware)
     case 'unlock': {
-      const payload = message.payload as { password: string } | undefined
+      const payload = message.payload as { password: string; walletId?: string } | undefined
       if (!payload?.password) throw new Error('Password required')
-      await wallet.unlock(payload.password)
+      const walletId = payload.walletId ?? wallet.getActiveWalletId()
+      if (!walletId) throw new Error('No wallet selected')
+      await wallet.unlock(walletId, payload.password)
       break
     }
-    case 'lock':
-      wallet.lock()
+    case 'lock': {
+      const payload = message.payload as { walletId?: string } | undefined
+      wallet.lock(payload?.walletId ?? undefined)
       break
+    }
     case 'setup': {
-      const payload = message.payload as { seed: string; password: string; tier?: import('../../src/types').TierName } | undefined
+      const payload = message.payload as {
+        seed: string; password: string; tier?: import('../../src/types').TierName
+        walletId?: string; walletName?: string
+      } | undefined
       if (!payload?.password || !payload?.seed) throw new Error('Seed and password required')
-      await wallet.setup(payload.seed, payload.password)
-      if (payload.tier) x402.setTier(payload.tier)
+
+      // Create wallet profile if it doesn't exist
+      let walletId = payload.walletId
+      if (!walletId) {
+        const profile = await registry.createWallet({
+          name: payload.walletName ?? 'Main Wallet',
+          mode: 'manual',
+          backendType: 'builtin',
+          tier: payload.tier,
+          isDefault: true,
+        })
+        walletId = profile.id
+      }
+
+      await wallet.setup(walletId, payload.seed, payload.password)
+      if (payload.tier) {
+        x402.setWalletTier(walletId, payload.tier)
+        x402.setTier(payload.tier)
+      }
       break
     }
     case 'setNetwork': {
@@ -53,8 +92,14 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
 
     // x402 concerns
     case 'setTier': {
-      const payload = message.payload as { tier: import('../../src/types').TierName } | undefined
-      if (payload?.tier) x402.setTier(payload.tier)
+      const payload = message.payload as { tier: import('../../src/types').TierName; walletId?: string } | undefined
+      if (payload?.tier) {
+        if (payload.walletId) {
+          x402.setWalletTier(payload.walletId, payload.tier)
+        } else {
+          x402.setTier(payload.tier)
+        }
+      }
       break
     }
 
@@ -62,10 +107,63 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       break // just return composed state below
 
     case 'switchBackend': {
-      const payload = message.payload as { type: 'builtin' | 'external'; extensionId?: string } | undefined
+      const payload = message.payload as { type: 'builtin' | 'external'; extensionId?: string; walletId?: string } | undefined
       if (!payload?.type) throw new Error('Backend type required')
-      await wallet.switchBackend(payload.type, payload.extensionId ? { extensionId: payload.extensionId } : undefined)
+      const walletId = payload.walletId ?? wallet.getActiveWalletId()
+      if (!walletId) throw new Error('No wallet selected')
+      await wallet.switchBackendForWallet(walletId, payload.type, payload.extensionId ? { extensionId: payload.extensionId } : undefined)
       break
+    }
+
+    // === Multi-wallet management ===
+
+    case 'listWallets': {
+      const wallets = await registry.listWallets()
+      return { wallets }
+    }
+    case 'createWallet': {
+      const payload = message.payload as import('../../src/wallet-registry').CreateWalletOptions | undefined
+      if (!payload?.name || !payload?.mode) throw new Error('name and mode required')
+      const profile = await registry.createWallet(payload)
+      return { wallet: profile }
+    }
+    case 'updateWallet': {
+      const payload = message.payload as { walletId: string; updates: Record<string, unknown> } | undefined
+      if (!payload?.walletId) throw new Error('walletId required')
+      const updated = await registry.updateWallet(payload.walletId, payload.updates)
+      return { wallet: updated }
+    }
+    case 'removeWallet': {
+      const payload = message.payload as { walletId: string } | undefined
+      if (!payload?.walletId) throw new Error('walletId required')
+      await registry.removeWallet(payload.walletId)
+      return { removed: true }
+    }
+    case 'selectWallet': {
+      const payload = message.payload as { walletId: string } | undefined
+      if (!payload?.walletId) throw new Error('walletId required')
+      wallet.setActiveWallet(payload.walletId)
+      return { activeWalletId: payload.walletId }
+    }
+
+    // === Transaction log / accounting ===
+
+    case 'getTransactionLog': {
+      const payload = message.payload as {
+        walletId?: string; origin?: string; since?: number; until?: number; limit?: number
+      } | undefined
+      const records = await txLog.query(payload)
+      return { records }
+    }
+    case 'configureSyncProvider': {
+      const payload = message.payload as import('../../src/types').SyncConfig | undefined
+      if (!payload?.provider) throw new Error('provider required')
+      await txLog.configureSyncProvider(payload)
+      return { configured: true }
+    }
+    case 'syncTransactions': {
+      const result = await txLog.sync()
+      return { ...result }
     }
 
     default:
@@ -95,7 +193,14 @@ chrome.runtime.onMessage.addListener(
         return true
       }
 
-      handleCWIRequest(message, wallet.getBackend(), sender.tab?.id)
+      // Select the best wallet for this origin + route to its backend
+      const origin = message.origin
+      registry.selectWalletForOrigin(origin).then((selectedWallet) => {
+        const walletId = selectedWallet?.id ?? wallet.getActiveWalletId() ?? undefined
+        const backend = wallet.getBackend(walletId)
+
+        return handleCWIRequest(message, backend, sender.tab?.id, walletId)
+      })
         .then((response) => sendResponse(response))
         .catch((err) => {
           sendResponse({
@@ -117,7 +222,8 @@ chrome.runtime.onMessage.addListener(
 
     // Spend status — allowed from content scripts (for the indicator)
     if (isInternalMessage(message) && message.type === 'getSpendStatus') {
-      x402.getSpendStatus()
+      const payload = message.payload as { walletId?: string } | undefined
+      x402.getSpendStatus(payload?.walletId ?? wallet.getActiveWalletId() ?? undefined)
         .then((status) => sendResponse(status))
         .catch(() => sendResponse(null))
       return true
@@ -152,9 +258,12 @@ chrome.runtime.onMessage.addListener(
 // Extension install / update handler
 // ---------------------------------------------------------------------------
 
-// Restore wallet backend choice on startup
-wallet.restoreBackendChoice().catch((err) => {
-  console.warn('x402: failed to restore wallet backend:', err)
+// Ensure default wallet profile exists + restore backend choices
+Promise.all([
+  registry.ensureDefaultWalletExists(),
+  wallet.restoreBackendChoice(),
+]).catch((err) => {
+  console.warn('x402: startup initialisation failed:', err)
 })
 
 chrome.runtime.onInstalled.addListener((details) => {
@@ -170,9 +279,21 @@ chrome.runtime.onInstalled.addListener((details) => {
 
       if (testConfig?.rootKeyHex && testConfig?.password) {
         try {
-          await wallet.setup(testConfig.rootKeyHex, testConfig.password)
+          // Create a default wallet profile for test setup
+          const defaultWallet = await registry.getDefaultWallet()
+          const walletId = defaultWallet?.id ?? (await registry.createWallet({
+            name: 'Test Wallet',
+            mode: 'manual',
+            backendType: 'builtin',
+            isDefault: true,
+          })).id
+
+          await wallet.setup(walletId, testConfig.rootKeyHex, testConfig.password)
           if (testConfig.chain) wallet.setNetwork(testConfig.chain)
-          if (testConfig.tier) x402.setTier(testConfig.tier)
+          if (testConfig.tier) {
+            x402.setWalletTier(walletId, testConfig.tier)
+            x402.setTier(testConfig.tier)
+          }
           await chrome.storage.local.remove('x402_test_config')
           console.log('x402: test-mode auto-setup complete')
         } catch (err) {
@@ -190,7 +311,15 @@ chrome.runtime.onInstalled.addListener((details) => {
       chrome.tabs.create({ url: chrome.runtime.getURL('ui/wallet/setup.html') })
       console.log('x402: extension installed — opening setup page')
     })
-  } else {
+  } else if (details.reason === 'update') {
+    // On update, migrate legacy single-wallet to multi-wallet
+    registry.getDefaultWallet().then(async (defaultWallet) => {
+      if (defaultWallet) {
+        await wallet.migrateLegacyWallet(defaultWallet.id)
+      }
+    }).catch((err) => {
+      console.warn('x402: legacy migration failed:', err)
+    })
     console.log(`x402: extension updated (reason: ${details.reason})`)
   }
 })
@@ -202,8 +331,8 @@ chrome.runtime.onInstalled.addListener((details) => {
 chrome.alarms.create('auto-lock', { periodInMinutes: 15 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'auto-lock' && wallet.isUnlocked()) {
+  if (alarm.name === 'auto-lock' && wallet.anyUnlocked()) {
     wallet.lock()
-    console.log('x402: wallet auto-locked after idle timeout')
+    console.log('x402: all wallets auto-locked after idle timeout')
   }
 })

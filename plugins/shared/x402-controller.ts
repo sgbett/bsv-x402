@@ -3,36 +3,67 @@
 import { ExtensionStorageAdapter } from './storage-bridge'
 import { RateLimiter, resolveSpendLimits } from '../../src/limits'
 import type { SpendCheckable } from '../../src/limits'
-import type { LimitCheckResult, SpendMode, TierName } from '../../src/types'
+import type { LimitCheckResult, SpendMode, TierName, WalletId } from '../../src/types'
 
 // ---------------------------------------------------------------------------
-// Spending limits controller
+// Spending limits controller (multi-wallet)
 //
-// Owns tier configuration, the rate limiter, and spend-limit storage.
+// Manages per-wallet rate limiters and spend-limit storage.
+// Each wallet has its own tier, mode, storage namespace, and limiter instance.
 // Protocol-agnostic — accepts both x402 Challenges and PaymentRequests.
 // ---------------------------------------------------------------------------
 
-let currentTier: TierName = 'Hey, Not Too Rough'
-let currentMode: SpendMode = 'interactive'
-
-const storage = new ExtensionStorageAdapter()
-let limiter: RateLimiter | null = null
-
-async function ensureLimiter(): Promise<RateLimiter> {
-  if (limiter) return limiter
-  const limits = resolveSpendLimits(currentTier, currentMode)
-  const state = await storage.load()
-  limiter = new RateLimiter(limits, state ?? undefined)
-  return limiter
+interface WalletLimiterState {
+  tier: TierName
+  mode: SpendMode
+  storage: ExtensionStorageAdapter
+  limiter: RateLimiter | null
 }
 
-async function persistLimiter(rl: RateLimiter): Promise<void> {
-  await storage.save(rl.getState())
+/** Per-wallet limiter state, keyed by wallet ID. */
+const walletLimiters: Map<WalletId, WalletLimiterState> = new Map()
+
+/** Global fallback for wallets with no explicit config. */
+let defaultTier: TierName = 'Hey, Not Too Rough'
+let defaultMode: SpendMode = 'interactive'
+
+function getOrCreateState(walletId: WalletId): WalletLimiterState {
+  let state = walletLimiters.get(walletId)
+  if (!state) {
+    state = {
+      tier: defaultTier,
+      mode: defaultMode,
+      storage: new ExtensionStorageAdapter(undefined, walletId),
+      limiter: null,
+    }
+    walletLimiters.set(walletId, state)
+  }
+  return state
 }
 
-/** Check spend limits before a payment. Accepts either a Challenge or PaymentRequest. */
-export async function checkSpendLimits(request: SpendCheckable, origin: string): Promise<{ allowed: boolean; reason?: string }> {
-  const rl = await ensureLimiter()
+async function ensureLimiter(walletId: WalletId): Promise<RateLimiter> {
+  const state = getOrCreateState(walletId)
+  if (state.limiter) return state.limiter
+  const limits = resolveSpendLimits(state.tier, state.mode)
+  const saved = await state.storage.load()
+  state.limiter = new RateLimiter(limits, saved ?? undefined)
+  return state.limiter
+}
+
+async function persistLimiter(walletId: WalletId): Promise<void> {
+  const state = walletLimiters.get(walletId)
+  if (!state?.limiter) return
+  await state.storage.save(state.limiter.getState())
+}
+
+/** Check spend limits for a specific wallet. */
+export async function checkSpendLimits(
+  request: SpendCheckable,
+  origin: string,
+  walletId?: WalletId,
+): Promise<{ allowed: boolean; reason?: string }> {
+  const id = walletId ?? '_default'
+  const rl = await ensureLimiter(id)
   const result: LimitCheckResult = rl.check(request, origin)
 
   if (result.action === 'allow') return { allowed: true }
@@ -43,37 +74,56 @@ export async function checkSpendLimits(request: SpendCheckable, origin: string):
   if (result.action === 'block') {
     if (result.severity === 'trip') {
       rl.trip()
-      await persistLimiter(rl)
+      await persistLimiter(id)
     }
     return { allowed: false, reason: result.reason }
   }
   return { allowed: true }
 }
 
-/** Record a completed payment in the rate limiter. */
-export async function recordPayment(origin: string, satoshis: number, txid: string): Promise<void> {
-  const rl = await ensureLimiter()
+/** Record a completed payment for a specific wallet. */
+export async function recordPayment(
+  origin: string,
+  satoshis: number,
+  txid: string,
+  walletId?: WalletId,
+): Promise<void> {
+  const id = walletId ?? '_default'
+  const rl = await ensureLimiter(id)
   rl.record({ timestamp: Date.now(), origin, satoshis, txid })
-  await persistLimiter(rl)
+  await persistLimiter(id)
 }
 
-/** Change the spending tier. Resets the limiter to pick up new limits. */
+/** Configure tier/mode for a specific wallet. Resets its limiter. */
+export function setWalletTier(walletId: WalletId, tier: TierName, mode?: SpendMode): void {
+  const state = getOrCreateState(walletId)
+  state.tier = tier
+  if (mode) state.mode = mode
+  state.limiter = null // reset to pick up new limits
+  console.log(`x402: wallet ${walletId} tier changed to "${tier}"`)
+}
+
+/** Change the global default tier (for wallets without explicit config). */
 export function setTier(tier: TierName): void {
-  currentTier = tier
-  limiter = null
-  console.log(`x402: tier changed to "${currentTier}"`)
+  defaultTier = tier
+  // Reset all limiters to pick up new defaults for unconfigured wallets
+  for (const [, state] of walletLimiters) {
+    state.limiter = null
+  }
+  console.log(`x402: default tier changed to "${tier}"`)
 }
 
-/** Get current x402 state for UI, including resolved limits. */
-export function getX402State(): {
+/** Get x402 state for a specific wallet. */
+export function getX402StateForWallet(walletId: WalletId): {
   tier: TierName
   mode: SpendMode
   limits: { perTxMaxSatoshis: number; windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }> }
 } {
-  const resolved = resolveSpendLimits(currentTier, currentMode)
+  const state = getOrCreateState(walletId)
+  const resolved = resolveSpendLimits(state.tier, state.mode)
   return {
-    tier: currentTier,
-    mode: currentMode,
+    tier: state.tier,
+    mode: state.mode,
     limits: {
       perTxMaxSatoshis: resolved.perTxMaxSatoshis,
       windows: resolved.windows.map(w => ({ window: w.window, maxSatoshis: w.maxSatoshis, maxTransactions: w.maxTransactions })),
@@ -81,22 +131,41 @@ export function getX402State(): {
   }
 }
 
-/** Get spend status for the indicator. */
-export async function getSpendStatus(): Promise<{
+/** Get current x402 state (default/global). */
+export function getX402State(): {
+  tier: TierName
+  mode: SpendMode
+  limits: { perTxMaxSatoshis: number; windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }> }
+} {
+  const resolved = resolveSpendLimits(defaultTier, defaultMode)
+  return {
+    tier: defaultTier,
+    mode: defaultMode,
+    limits: {
+      perTxMaxSatoshis: resolved.perTxMaxSatoshis,
+      windows: resolved.windows.map(w => ({ window: w.window, maxSatoshis: w.maxSatoshis, maxTransactions: w.maxTransactions })),
+    },
+  }
+}
+
+/** Get spend status for the indicator, optionally per-wallet. */
+export async function getSpendStatus(walletId?: WalletId): Promise<{
   spent: number
   limit: number
   window: string
   percentage: number
   circuitBroken: boolean
+  walletId?: WalletId
 }> {
-  const rl = await ensureLimiter()
-  const state = rl.getState()
-  const limits = resolveSpendLimits(currentTier, currentMode)
+  const id = walletId ?? '_default'
+  const rl = await ensureLimiter(id)
+  const rlState = rl.getState()
+  const state = getOrCreateState(id)
+  const limits = resolveSpendLimits(state.tier, state.mode)
 
-  // Use the first (shortest) window for the indicator
   const firstWindow = limits.windows[0]
   if (!firstWindow) {
-    return { spent: 0, limit: 0, window: 'none', percentage: 0, circuitBroken: state.circuitBroken }
+    return { spent: 0, limit: 0, window: 'none', percentage: 0, circuitBroken: rlState.circuitBroken, walletId: walletId ?? undefined }
   }
 
   const WINDOW_MS: Record<string, number> = {
@@ -107,7 +176,7 @@ export async function getSpendStatus(): Promise<{
   }
 
   const cutoff = Date.now() - (WINDOW_MS[firstWindow.window] ?? 86_400_000)
-  const spent = state.entries
+  const spent = rlState.entries
     .filter((e) => e.timestamp >= cutoff)
     .reduce((sum, e) => sum + e.satoshis, 0)
 
@@ -116,6 +185,7 @@ export async function getSpendStatus(): Promise<{
     limit: firstWindow.maxSatoshis,
     window: firstWindow.window,
     percentage: firstWindow.maxSatoshis > 0 ? spent / firstWindow.maxSatoshis : 0,
-    circuitBroken: state.circuitBroken,
+    circuitBroken: rlState.circuitBroken,
+    walletId: walletId ?? undefined,
   }
 }
