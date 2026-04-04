@@ -89,4 +89,9 @@ export class BuiltInWalletBackend implements WalletBackend {
   hasOwnUI(): boolean {
     return false
   }
+
+  /** Get the underlying WalletInterface (for fundWalletFromP2PKHOutpoints). */
+  getWalletInterface(): WalletInterface | null {
+    return this.wallet
+  }
 }

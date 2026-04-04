@@ -23,6 +23,22 @@ interface PopupState {
 const $ = <T extends HTMLElement>(id: string): T =>
   document.getElementById(id) as T;
 
+async function copyToClipboard(text: string, btn: HTMLElement): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    document.body.removeChild(textarea);
+  }
+  const original = btn.textContent;
+  btn.textContent = "Copied!";
+  setTimeout(() => { btn.textContent = original; }, 1500);
+}
+
 // ---------------------------------------------------------------------------
 // Wallet panel UI (only when built-in backend is active)
 // ---------------------------------------------------------------------------
@@ -60,11 +76,11 @@ function updateWalletPanel(state: PopupState): void {
   balanceEl.textContent =
     state.balance !== undefined ? `${state.balance.toLocaleString()} sats` : "--- sats";
 
-  // Show/hide address section based on unlock state
+  // Show/hide address and identity sections based on unlock state
   const addressSection = document.getElementById("address-section") as HTMLDivElement | null;
-  if (addressSection) {
-    addressSection.hidden = !state.isUnlocked;
-  }
+  const identitySection = document.getElementById("identity-section") as HTMLDivElement | null;
+  if (addressSection) addressSection.hidden = !state.isUnlocked;
+  if (identitySection) identitySection.hidden = !state.isUnlocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -130,17 +146,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Fetch and display wallet address when unlocked
-  async function fetchAddress(): Promise<void> {
+  // Fetch and display wallet identity key + address when unlocked
+  async function fetchWalletInfo(): Promise<void> {
     const addressDisplay = document.getElementById("address-display");
-    if (!addressDisplay) return;
+    const identityDisplay = document.getElementById("identity-display");
+    const identitySection = document.getElementById("identity-section");
     try {
-      const result = await sendMessage({ type: "getAddress" }) as PopupState & { address?: string };
-      if (result.address) {
+      const result = await sendMessage({ type: "getAddress" }) as PopupState & { identityKey?: string; address?: string };
+      if (identityDisplay && result.identityKey) {
+        identityDisplay.textContent = result.identityKey;
+        if (identitySection) identitySection.hidden = false;
+      }
+      if (addressDisplay && result.address) {
         addressDisplay.textContent = result.address;
       }
     } catch {
-      addressDisplay.textContent = "";
+      if (addressDisplay) addressDisplay.textContent = "";
+      if (identityDisplay) identityDisplay.textContent = "";
     }
   }
 
@@ -153,7 +175,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   try {
     const state = await sendMessage({ type: "getState" });
     updateUI(state);
-    if (state.isUnlocked) fetchAddress();
+    if (state.isUnlocked) fetchWalletInfo();
   } catch {
     updateUI({
       isSetUp: false,
@@ -202,7 +224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             unlockForm.hidden = true;
             unlockPassword.value = "";
             updateUI(state);
-            fetchAddress();
+            fetchWalletInfo();
           } catch (err) {
             if (unlockError) unlockError.textContent = err instanceof Error ? err.message : String(err);
           } finally {
@@ -251,28 +273,23 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Wallet: Copy identity key
+  const copyIdentityBtn = document.getElementById("copy-identity-btn");
+  if (copyIdentityBtn) {
+    copyIdentityBtn.addEventListener("click", async () => {
+      const identityDisplay = document.getElementById("identity-display");
+      const text = identityDisplay?.textContent ?? "";
+      if (!text) return;
+      await copyToClipboard(text, copyIdentityBtn);
+    });
+  }
+
   // Wallet: Copy address
   const copyAddressBtn = document.getElementById("copy-address-btn");
   if (copyAddressBtn) {
     copyAddressBtn.addEventListener("click", async () => {
-      const addressDisplay = document.getElementById("address-display");
-      const text = addressDisplay?.textContent ?? "";
-      if (!text) return;
-      try {
-        await navigator.clipboard.writeText(text);
-        copyAddressBtn.textContent = "Copied!";
-        setTimeout(() => { copyAddressBtn.textContent = "Copy"; }, 1500);
-      } catch {
-        // Fallback for environments where clipboard API is unavailable
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        document.body.appendChild(textarea);
-        textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-        copyAddressBtn.textContent = "Copied!";
-        setTimeout(() => { copyAddressBtn.textContent = "Copy"; }, 1500);
-      }
+      const text = document.getElementById("address-display")?.textContent ?? "";
+      if (text) await copyToClipboard(text, copyAddressBtn);
     });
   }
 
