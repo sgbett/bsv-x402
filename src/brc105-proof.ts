@@ -258,6 +258,7 @@ export async function constructBrc105Proof(
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix,
     transaction: transactionBase64,
+    txid: result.txid,
   }
 }
 

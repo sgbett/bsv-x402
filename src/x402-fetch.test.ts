@@ -366,7 +366,7 @@ function makeBrc105Response(
   const headers: Record<string, string> = {
     "x-bsv-payment-version": "1.0",
     "x-bsv-payment-satoshis-required": String(satoshis),
-    "x-bsv-auth-identity-key": "02abc123def456",
+    "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
     "x-bsv-payment-derivation-prefix": "test-prefix",
     ...overrides,
   }
@@ -381,6 +381,7 @@ function mockBrc105ProofConstructor(): (challenge: Brc105Challenge) => Promise<B
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix: "mock-suffix",
     transaction: "bW9jay10eA==", // "mock-tx" in base64
+    txid: "brc105-mock-txid",
   }))
 }
 
@@ -506,7 +507,7 @@ describe("createX402Fetch — BRC-105", () => {
         }),
         "x-bsv-payment-version": "1.0",
         "x-bsv-payment-satoshis-required": "1000",
-        "x-bsv-auth-identity-key": "02abc123",
+        "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
         "x-bsv-payment-derivation-prefix": "prefix",
       },
     })

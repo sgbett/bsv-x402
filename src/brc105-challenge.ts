@@ -35,6 +35,9 @@ export function parseBrc105Challenge(response: Response): Brc105Challenge {
   if (serverIdentityKey === null || serverIdentityKey.length === 0) {
     throw new Error("BRC-105: missing or empty x-bsv-auth-identity-key header")
   }
+  if (!/^0[23][0-9a-fA-F]{64}$/.test(serverIdentityKey)) {
+    throw new Error("BRC-105: x-bsv-auth-identity-key must be a 33-byte compressed public key (hex)")
+  }
 
   const derivationPrefix = response.headers.get("x-bsv-payment-derivation-prefix")
   if (derivationPrefix === null || derivationPrefix.length === 0) {

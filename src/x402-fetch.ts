@@ -184,6 +184,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
     init: RequestInit | undefined,
     origin: string,
     amount: number,
+    protocol: import("./types").PaymentProtocol,
     buildProof: () => Promise<P>,
     retryWithProof: (proof: P) => Promise<Response>,
     makeLedgerEntry: (proof: P) => import("./types").LedgerEntry,
@@ -202,7 +203,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       }
 
       // Build a SpendCheckable for the rate limiter
-      const spendCheckable: PaymentRequest = { amount, origin, protocol: "x402" }
+      const spendCheckable: PaymentRequest = { amount, origin, protocol }
       const result: LimitCheckResult = rl.check(spendCheckable, origin)
 
       if (result.action === "block") {
@@ -291,7 +292,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       return handlePaymentFlow(
         response, input, init, origin,
-        challenge.amount,
+        challenge.amount, "x402",
         async () => constructProof(challenge),
         (proof) => {
           const headers = new Headers(init?.headers)
@@ -323,7 +324,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       return handlePaymentFlow(
         response, input, init, origin,
-        brc105Challenge.satoshisRequired,
+        brc105Challenge.satoshisRequired, "brc105",
         async () => {
           if (brc105ProofConstructor) {
             return brc105ProofConstructor(brc105Challenge)
@@ -339,7 +340,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
           timestamp: nowFn(),
           origin,
           satoshis: brc105Challenge.satoshisRequired,
-          txid: `brc105-${Date.now()}`,
+          txid: (proof as import("./types").Brc105Proof).txid,
           protocol: "brc105" as const,
         }),
       )

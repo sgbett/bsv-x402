@@ -8,7 +8,7 @@ function makeResponse(headers: Record<string, string>): Response {
 const VALID_HEADERS = {
   "x-bsv-payment-version": "1.0",
   "x-bsv-payment-satoshis-required": "5",
-  "x-bsv-auth-identity-key": "02abc123",
+  "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
   "x-bsv-payment-derivation-prefix": "AQID",
 }
 
@@ -17,7 +17,7 @@ describe("parseBrc105Challenge", () => {
     const c = parseBrc105Challenge(makeResponse(VALID_HEADERS))
     expect(c.version).toBe("1.0")
     expect(c.satoshisRequired).toBe(5)
-    expect(c.serverIdentityKey).toBe("02abc123")
+    expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
     expect(c.derivationPrefix).toBe("AQID")
   })
 
@@ -25,7 +25,7 @@ describe("parseBrc105Challenge", () => {
     const c = parseBrc105Challenge(makeResponse({
       "X-BSV-Payment-Version": "1.0",
       "X-BSV-Payment-Satoshis-Required": "5",
-      "X-BSV-Auth-Identity-Key": "02abc123",
+      "X-BSV-Auth-Identity-Key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
       "X-BSV-Payment-Derivation-Prefix": "AQID",
     }))
     expect(c.version).toBe("1.0")
@@ -87,6 +87,27 @@ describe("parseBrc105Challenge", () => {
       ...VALID_HEADERS,
       "x-bsv-auth-identity-key": "",
     }))).toThrow("missing or empty x-bsv-auth-identity-key")
+  })
+
+  it("rejects identity key that is not a compressed public key", () => {
+    expect(() => parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-auth-identity-key": "not-a-pubkey",
+    }))).toThrow("compressed public key")
+  })
+
+  it("rejects identity key with wrong prefix byte", () => {
+    expect(() => parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-auth-identity-key": "0479be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+    }))).toThrow("compressed public key")
+  })
+
+  it("rejects identity key with wrong length", () => {
+    expect(() => parseBrc105Challenge(makeResponse({
+      ...VALID_HEADERS,
+      "x-bsv-auth-identity-key": "02abc123",
+    }))).toThrow("compressed public key")
   })
 
   it("rejects missing derivation prefix header", () => {

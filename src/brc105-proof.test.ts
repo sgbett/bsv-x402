@@ -131,9 +131,11 @@ describe("constructBrc105Proof", () => {
     expect(proof).toHaveProperty("derivationPrefix")
     expect(proof).toHaveProperty("derivationSuffix")
     expect(proof).toHaveProperty("transaction")
+    expect(proof).toHaveProperty("txid")
     expect(proof.derivationPrefix).toBe(CHALLENGE.derivationPrefix)
     expect(typeof proof.derivationSuffix).toBe("string")
     expect(typeof proof.transaction).toBe("string")
+    expect(proof.txid).toBe("aabbccdd")
   })
 
   it("calls getPublicKey with correct BRC-29 derivation parameters", async () => {

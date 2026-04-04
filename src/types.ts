@@ -33,6 +33,7 @@ export interface Brc105Proof {
   derivationPrefix: string
   derivationSuffix: string
   transaction: string  // base64-encoded
+  txid: string         // from wallet createAction result
 }
 
 export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105Proof>
