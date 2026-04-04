@@ -142,11 +142,25 @@ export function setNetwork(network: string): void {
 export async function getWalletState(): Promise<Record<string, unknown>> {
   const result = await chrome.storage.local.get(WALLET_KEY_STORAGE)
   const hasStoredKey = result[WALLET_KEY_STORAGE] != null
-  return {
+  const state: Record<string, unknown> = {
     isSetUp: hasStoredKey,
     isUnlocked: walletInitialised,
     network: walletNetwork,
   }
+
+  // Fetch balance from wallet backend when unlocked
+  if (walletInitialised && backend) {
+    try {
+      const outputs = await backend.call('listOutputs', { basket: 'default', limit: 10000 }, 'self') as { outputs: Array<{ satoshis: number; spendable: boolean }> }
+      state.balance = outputs.outputs
+        .filter((o) => o.spendable)
+        .reduce((sum, o) => sum + o.satoshis, 0)
+    } catch {
+      // Balance unavailable — leave as undefined
+    }
+  }
+
+  return state
 }
 
 /** Switch to a different wallet backend. Persists the choice. */
