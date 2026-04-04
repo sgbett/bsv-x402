@@ -3,3 +3,4 @@ dist/
 dist/plugins/
 .mcp.json
 tmp/
+docs/

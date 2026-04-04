@@ -14,20 +14,26 @@ export type { SpendCheckable } from "./limits"
 
 // Storage
 export { LocalStorageAdapter } from "./storage"
+export type { KeyDeriver } from "./storage"
 
 // 2FA
 export { WalletTwoFactorProvider } from "./two-factor"
 
 // Site policy
 export { resolveSitePolicy } from "./site-policy"
+export type { SitePromptFn } from "./site-policy"
 
 // Types
 export type {
+  BlockSeverity,
   Brc105Challenge,
   Brc105Proof,
   Brc105ProofConstructor,
   Brc105Wallet,
   Challenge,
+  CWICreateActionOutput,
+  CWICreateActionParams,
+  CWICreateActionResult,
   LedgerEntry,
   LimitCheckResult,
   LimitState,

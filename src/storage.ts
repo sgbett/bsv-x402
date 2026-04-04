@@ -3,7 +3,7 @@ import type { LedgerEntry, LimitState, SitePolicy, StorageAdapter } from "./type
 const STATE_KEY = "x402:limit-state"
 const POLICIES_KEY = "x402:site-policies"
 
-type KeyDeriver = () => Promise<Uint8Array>
+export type KeyDeriver = () => Promise<Uint8Array>
 
 async function computeHmac(data: string, key: Uint8Array): Promise<string> {
   const cryptoKey = await crypto.subtle.importKey(
