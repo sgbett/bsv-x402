@@ -210,6 +210,7 @@ async function createDerivationSuffix(wallet: Brc105Wallet): Promise<string> {
 export async function constructBrc105Proof(
   challenge: Brc105Challenge,
   wallet: Brc105Wallet,
+  origin?: string,
 ): Promise<Brc105Proof> {
   // Step 1: Generate derivation suffix
   const derivationSuffix = await createDerivationSuffix(wallet)
@@ -226,12 +227,15 @@ export async function constructBrc105Proof(
   const lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
 
   // Step 4: Create the payment transaction
+  const description = origin
+    ? `Payment for request to ${origin}`
+    : "BRC-105 payment"
   const result = await wallet.createAction({
-    description: "BRC-105 payment",
+    description,
     outputs: [{
       satoshis: challenge.satoshisRequired,
       lockingScript,
-      description: "BRC-105 payment output",
+      outputDescription: "HTTP request payment",
       customInstructions: JSON.stringify({
         derivationPrefix: challenge.derivationPrefix,
         derivationSuffix,
