@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.0] - 2026-04-05
+
+### Added
+
+- **Client identity key in BRC-105 proofs** — `constructBrc105Proof` now fetches the client's identity key and includes `clientIdentityKey` in the `x-bsv-payment` JSON (#63)
+- **`Brc105Wallet.getPublicKey`** accepts `{ identityKey: true }` for identity key retrieval (union type alongside derivation params) (#66)
+- **TypeDoc API documentation** — `npm run docs` generates API reference (#39)
+
+### Changed
+
+- **BRC-105 always uses server identity key as counterparty** — removed `"anyone"` fallback; BRC-29 derivation always uses `challenge.serverIdentityKey` (#64)
+- **`Brc105Proof.clientIdentityKey` is required** — custom `Brc105ProofConstructor` implementations must include this field (**breaking change**) (#65)
+- **`Brc105Challenge.authenticated` flag** — indicates whether the server identity key came from BRC-103 auth or standalone `x-bsv-payment-identity-key` header (#59)
+
+### Fixed
+
+- **UTXO sweep for repeat deposits** — changed from per-address to per-outpoint dedup so new deposits to an already-funded identity address are imported (#57)
+- **Popup balance display** — shows wallet balance from `listOutputs` (#53)
+- **Wallet funding address** — identity key P2PKH address displayed correctly (#52)
+- **BRC-105 compliance gaps** — derivation suffix, proof error reporting, payment identity key header fallback (#48, #45, #42)
+- **Wallet Monitor startup** — UTXO imports now start the Monitor for tx processing; deduplicates imports on repeated unlock (#55)
+- **Popup receive address** — displays identity address for funding (#46)
+
 ## [0.3.0] - 2026-04-04
 
 ### Added
