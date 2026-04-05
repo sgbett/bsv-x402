@@ -96,4 +96,4 @@ Our CWI implementation **must stay in sync** with the BSV Browser reference impl
 
 ## Status
 
-Active development (v0.3.0). Library core is functional: multi-protocol 402 handling (custom + BRC-105), BRC-29 key derivation, spending controls with Doom II tiers. Browser extensions ship a full BRC-100 wallet via `@bsv/wallet-toolbox-client` with CWI injection and x402 spending controls. See #40 for known BRC-105 compliance gaps.
+Active development (v0.4.0). Library core is functional: multi-protocol 402 handling (custom + BRC-105), BRC-29 key derivation with mutual authentication (client identity key in proofs), spending controls with Doom II tiers. Browser extensions ship a full BRC-100 wallet via `@bsv/wallet-toolbox-client` with CWI injection and x402 spending controls.
