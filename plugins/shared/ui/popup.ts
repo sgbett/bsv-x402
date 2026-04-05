@@ -185,6 +185,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Poll balance every 10s while popup is open
+  setInterval(async () => {
+    try {
+      const state = await sendMessage({ type: "getState" });
+      updateUI(state);
+    } catch {
+      // Ignore — background may be restarting
+    }
+  }, 10_000);
+
   // Wallet: Lock / Unlock (guarded — wallet panel may not exist)
   const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement | null;
   const unlockForm = document.getElementById("unlock-form") as HTMLDivElement | null;
