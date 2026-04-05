@@ -19,6 +19,7 @@ describe("parseBrc105Challenge", () => {
     expect(c.satoshisRequired).toBe(5)
     expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
     expect(c.derivationPrefix).toBe("AQID")
+    expect(c.authenticated).toBe(true)
   })
 
   it("handles case-insensitive header names", () => {
@@ -84,6 +85,7 @@ describe("parseBrc105Challenge", () => {
       "x-bsv-payment-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
     }))
     expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+    expect(c.authenticated).toBe(false)
   })
 
   it("falls back to payment header when auth header is empty", () => {
@@ -93,6 +95,7 @@ describe("parseBrc105Challenge", () => {
       "x-bsv-payment-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
     }))
     expect(c.serverIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+    expect(c.authenticated).toBe(false)
   })
 
   it("prefers x-bsv-auth-identity-key when both are present", () => {

@@ -19,6 +19,8 @@ export interface Brc105Challenge {
   satoshisRequired: number
   serverIdentityKey: string
   derivationPrefix: string
+  /** Whether the identity key came from BRC-103 auth (vs standalone x-bsv-payment-identity-key). */
+  authenticated: boolean
 }
 
 /** Minimal wallet interface for BRC-105 proof construction.
