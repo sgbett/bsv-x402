@@ -2,7 +2,7 @@
 
 import type { CWIMethodName } from './messages'
 import type { WalletBackend } from './wallet-backend'
-import { SetupClient, type Wallet } from '@bsv/wallet-toolbox-client'
+import { SetupClient, type Wallet, type Monitor } from '@bsv/wallet-toolbox-client'
 import type { WalletInterface } from '@bsv/sdk'
 
 // ---------------------------------------------------------------------------
@@ -32,6 +32,7 @@ const WALLET_METHODS = new Set<CWIMethodName>([
 
 export class BuiltInWalletBackend implements WalletBackend {
   private wallet: WalletInterface | null = null
+  private monitor: Monitor | null = null
   private chain: 'main' | 'test' = 'main'
 
   /**
@@ -46,6 +47,11 @@ export class BuiltInWalletBackend implements WalletBackend {
       databaseName: `x402-wallet-${chain}`,
     })
     this.wallet = result.wallet
+    this.monitor = result.monitor
+    // Start the monitor in the background (don't block unlock)
+    this.monitor.startTasks()
+      .then(() => console.log('x402: wallet monitor started'))
+      .catch((err) => console.warn('x402: monitor failed to start:', err))
   }
 
   async call(method: CWIMethodName, params: unknown, origin: string): Promise<unknown> {

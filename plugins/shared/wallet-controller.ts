@@ -151,12 +151,13 @@ export async function getWalletState(): Promise<Record<string, unknown>> {
   // Fetch balance from wallet backend when unlocked
   if (walletInitialised && backend) {
     try {
-      const outputs = await backend.call('listOutputs', { basket: 'default', limit: 10000 }, 'self') as { outputs: Array<{ satoshis: number; spendable: boolean }> }
+      const outputs = await backend.call('listOutputs', { basket: 'default', limit: 10000 }, 'self') as { totalOutputs: number; outputs: Array<{ satoshis: number; spendable: boolean }> }
+      console.log(`x402: listOutputs returned ${outputs.totalOutputs} total, ${outputs.outputs.length} in page, spendable:`, outputs.outputs.filter((o) => o.spendable).map((o) => o.satoshis))
       state.balance = outputs.outputs
         .filter((o) => o.spendable)
         .reduce((sum, o) => sum + o.satoshis, 0)
-    } catch {
-      // Balance unavailable — leave as undefined
+    } catch (err) {
+      console.warn('x402: listOutputs failed:', err)
     }
   }
 

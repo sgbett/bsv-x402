@@ -69,6 +69,23 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
 // Scan for legacy P2PKH UTXOs at the identity key address
 // ---------------------------------------------------------------------------
 
+const FUNDED_ADDRESS_KEY = 'x402_funded_addresses'
+
+async function isAddressAlreadyFunded(address: string): Promise<boolean> {
+  const result = await chrome.storage.local.get(FUNDED_ADDRESS_KEY)
+  const arr = result[FUNDED_ADDRESS_KEY] as string[] | undefined
+  return arr?.includes(address) ?? false
+}
+
+async function markAddressFunded(address: string): Promise<void> {
+  const result = await chrome.storage.local.get(FUNDED_ADDRESS_KEY)
+  const arr = result[FUNDED_ADDRESS_KEY] as string[] | undefined ?? []
+  if (!arr.includes(address)) {
+    arr.push(address)
+    await chrome.storage.local.set({ [FUNDED_ADDRESS_KEY]: arr })
+  }
+}
+
 async function scanAndImportUtxos(): Promise<void> {
   const rootKeyHex = wallet.getRootKeyHex()
   if (!rootKeyHex) return
@@ -76,6 +93,12 @@ async function scanAndImportUtxos(): Promise<void> {
   const backend = wallet.getBackend()
   const { publicKey: identityKeyHex } = await backend.call('getPublicKey', { identityKey: true }, 'self') as { publicKey: string }
   const address = await pubkeyToAddress(identityKeyHex)
+
+  // Skip if we've already imported from this address
+  if (await isAddressAlreadyFunded(address)) {
+    console.log('x402: identity address already funded, skipping scan')
+    return
+  }
 
   // Look up UTXOs at the identity key's P2PKH address
   const utxos = await fetchUtxos(address)
@@ -102,12 +125,19 @@ async function scanAndImportUtxos(): Promise<void> {
   }
 
   const results = await SetupClient.fundWalletFromP2PKHOutpoints(walletInterface, outpoints, p2pkhKey)
+  let anySuccess = false
   for (const r of results) {
     if (r.success) {
       console.log(`x402: imported UTXO ${r.outpoint} → ${r.txid}`)
+      anySuccess = true
     } else {
       console.warn(`x402: failed to import UTXO ${r.outpoint}: ${r.error}`)
     }
+  }
+  if (anySuccess) {
+    await markAddressFunded(address)
+    // Notify any open popup to refresh balance
+    chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
   }
 }
 
