@@ -69,21 +69,10 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
 // Scan for legacy P2PKH UTXOs at the identity key address
 // ---------------------------------------------------------------------------
 
-const IMPORTED_OUTPOINTS_KEY = 'x402_imported_outpoints'
-
-async function getImportedOutpoints(): Promise<Set<string>> {
-  const result = await chrome.storage.local.get(IMPORTED_OUTPOINTS_KEY)
-  const arr = result[IMPORTED_OUTPOINTS_KEY] as string[] | undefined
-  return new Set(arr ?? [])
-}
-
-async function markOutpointsImported(outpoints: string[]): Promise<void> {
-  const existing = await getImportedOutpoints()
-  for (const op of outpoints) existing.add(op)
-  await chrome.storage.local.set({ [IMPORTED_OUTPOINTS_KEY]: [...existing] })
-}
-
 async function scanAndImportUtxos(): Promise<void> {
+  // Clean up orphaned storage from previous dedup implementations (#55, #57)
+  chrome.storage.local.remove(['x402_funded_addresses', 'x402_imported_outpoints'])
+
   const rootKeyHex = wallet.getRootKeyHex()
   if (!rootKeyHex) return
 
@@ -98,18 +87,10 @@ async function scanAndImportUtxos(): Promise<void> {
     return
   }
 
-  // Filter out already-imported outpoints
-  const imported = await getImportedOutpoints()
-  const newUtxos = utxos.filter((u) => !imported.has(`${u.tx_hash}.${u.tx_pos}`))
-  if (newUtxos.length === 0) {
-    console.log('x402: all UTXOs at identity address already imported')
-    return
-  }
-
-  console.log(`x402: found ${newUtxos.length} new UTXO(s) at identity address, importing...`)
+  console.log(`x402: found ${utxos.length} UTXO(s) at identity address, importing...`)
 
   // Build outpoints and KeyPairAddress for fundWalletFromP2PKHOutpoints
-  const outpoints = newUtxos.map((u) => `${u.tx_hash}.${u.tx_pos}`)
+  const outpoints = utxos.map((u) => `${u.tx_hash}.${u.tx_pos}`)
   const { PrivateKey } = await import('@bsv/sdk')
   const privateKey = PrivateKey.fromHex(rootKeyHex)
   const publicKey = privateKey.toPublicKey()
@@ -123,19 +104,19 @@ async function scanAndImportUtxos(): Promise<void> {
     return
   }
 
+  // No dedup — let the wallet handle it. If a previous sweep tx failed,
+  // the inputs were released and the retry will succeed. If a previous
+  // sweep is already confirmed, the wallet will reject the double-spend
+  // harmlessly. See: https://github.com/bsv-blockchain/ts-sdk/pull/510
   const results = await SetupClient.fundWalletFromP2PKHOutpoints(walletInterface, outpoints, p2pkhKey)
-  const successOutpoints: string[] = []
   for (const r of results) {
     if (r.success) {
       console.log(`x402: imported UTXO ${r.outpoint} → ${r.txid}`)
-      successOutpoints.push(r.outpoint)
     } else {
       console.warn(`x402: failed to import UTXO ${r.outpoint}: ${r.error}`)
     }
   }
-  if (successOutpoints.length > 0) {
-    await markOutpointsImported(successOutpoints)
-    // Notify any open popup to refresh balance
+  if (results.some((r) => r.success)) {
     chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
   }
 }
