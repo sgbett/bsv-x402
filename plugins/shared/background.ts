@@ -69,21 +69,18 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
 // Scan for legacy P2PKH UTXOs at the identity key address
 // ---------------------------------------------------------------------------
 
-const FUNDED_ADDRESS_KEY = 'x402_funded_addresses'
+const IMPORTED_OUTPOINTS_KEY = 'x402_imported_outpoints'
 
-async function isAddressAlreadyFunded(address: string): Promise<boolean> {
-  const result = await chrome.storage.local.get(FUNDED_ADDRESS_KEY)
-  const arr = result[FUNDED_ADDRESS_KEY] as string[] | undefined
-  return arr?.includes(address) ?? false
+async function getImportedOutpoints(): Promise<Set<string>> {
+  const result = await chrome.storage.local.get(IMPORTED_OUTPOINTS_KEY)
+  const arr = result[IMPORTED_OUTPOINTS_KEY] as string[] | undefined
+  return new Set(arr ?? [])
 }
 
-async function markAddressFunded(address: string): Promise<void> {
-  const result = await chrome.storage.local.get(FUNDED_ADDRESS_KEY)
-  const arr = result[FUNDED_ADDRESS_KEY] as string[] | undefined ?? []
-  if (!arr.includes(address)) {
-    arr.push(address)
-    await chrome.storage.local.set({ [FUNDED_ADDRESS_KEY]: arr })
-  }
+async function markOutpointsImported(outpoints: string[]): Promise<void> {
+  const existing = await getImportedOutpoints()
+  for (const op of outpoints) existing.add(op)
+  await chrome.storage.local.set({ [IMPORTED_OUTPOINTS_KEY]: [...existing] })
 }
 
 async function scanAndImportUtxos(): Promise<void> {
@@ -94,12 +91,6 @@ async function scanAndImportUtxos(): Promise<void> {
   const { publicKey: identityKeyHex } = await backend.call('getPublicKey', { identityKey: true }, 'self') as { publicKey: string }
   const address = await pubkeyToAddress(identityKeyHex)
 
-  // Skip if we've already imported from this address
-  if (await isAddressAlreadyFunded(address)) {
-    console.log('x402: identity address already funded, skipping scan')
-    return
-  }
-
   // Look up UTXOs at the identity key's P2PKH address
   const utxos = await fetchUtxos(address)
   if (utxos.length === 0) {
@@ -107,10 +98,18 @@ async function scanAndImportUtxos(): Promise<void> {
     return
   }
 
-  console.log(`x402: found ${utxos.length} UTXO(s) at identity address, importing...`)
+  // Filter out already-imported outpoints
+  const imported = await getImportedOutpoints()
+  const newUtxos = utxos.filter((u) => !imported.has(`${u.tx_hash}.${u.tx_pos}`))
+  if (newUtxos.length === 0) {
+    console.log('x402: all UTXOs at identity address already imported')
+    return
+  }
+
+  console.log(`x402: found ${newUtxos.length} new UTXO(s) at identity address, importing...`)
 
   // Build outpoints and KeyPairAddress for fundWalletFromP2PKHOutpoints
-  const outpoints = utxos.map((u) => `${u.tx_hash}.${u.tx_pos}`)
+  const outpoints = newUtxos.map((u) => `${u.tx_hash}.${u.tx_pos}`)
   const { PrivateKey } = await import('@bsv/sdk')
   const privateKey = PrivateKey.fromHex(rootKeyHex)
   const publicKey = privateKey.toPublicKey()
@@ -125,17 +124,17 @@ async function scanAndImportUtxos(): Promise<void> {
   }
 
   const results = await SetupClient.fundWalletFromP2PKHOutpoints(walletInterface, outpoints, p2pkhKey)
-  let anySuccess = false
+  const successOutpoints: string[] = []
   for (const r of results) {
     if (r.success) {
       console.log(`x402: imported UTXO ${r.outpoint} → ${r.txid}`)
-      anySuccess = true
+      successOutpoints.push(r.outpoint)
     } else {
       console.warn(`x402: failed to import UTXO ${r.outpoint}: ${r.error}`)
     }
   }
-  if (anySuccess) {
-    await markAddressFunded(address)
+  if (successOutpoints.length > 0) {
+    await markOutpointsImported(successOutpoints)
     // Notify any open popup to refresh balance
     chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
   }
