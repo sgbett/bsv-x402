@@ -46,6 +46,8 @@ export class BuiltInWalletBackend implements WalletBackend {
       rootKeyHex,
       databaseName: `x402-wallet-${chain}`,
     })
+    // ARC requires minimum 100 sat/kb; wallet-toolbox defaults to 1 sat/kb
+    result.activeStorage.feeModel = { model: 'sat/kb', value: 100 }
     this.wallet = result.wallet
     this.monitor = result.monitor
     // Start the monitor in the background (don't block unlock)
