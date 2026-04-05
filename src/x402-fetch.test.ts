@@ -425,6 +425,9 @@ describe("createX402Fetch — BRC-105", () => {
     expect(proof).toHaveProperty("derivationSuffix")
     expect(proof).toHaveProperty("transaction")
     expect(proof.clientIdentityKey).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+
+    // Verify x-bsv-auth-identity-key header is set separately
+    expect(retryHeaders.get("x-bsv-auth-identity-key")).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
   })
 
   it("blocks BRC-105 402 exceeding per-tx limit", async () => {

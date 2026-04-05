@@ -349,6 +349,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         (proof) => {
           const headers = new Headers(init?.headers)
           headers.set("x-bsv-payment", JSON.stringify(proof))
+          headers.set("x-bsv-auth-identity-key", (proof as import("./types").Brc105Proof).clientIdentityKey)
           return fetch(input, { ...init, headers })
         },
         (proof) => ({
