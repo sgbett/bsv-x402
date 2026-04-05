@@ -70,6 +70,9 @@ async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 async function scanAndImportUtxos(): Promise<void> {
+  // Clean up orphaned storage from previous dedup implementations (#55, #57)
+  chrome.storage.local.remove(['x402_funded_addresses', 'x402_imported_outpoints'])
+
   const rootKeyHex = wallet.getRootKeyHex()
   if (!rootKeyHex) return
 
