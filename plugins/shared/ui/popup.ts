@@ -293,4 +293,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Listen for balance updates from background (e.g. after UTXO import)
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message?.type === 'balanceUpdated') {
+      sendMessage({ type: "getState" }).then(updateUI).catch(() => {});
+    }
+  });
+
 });
