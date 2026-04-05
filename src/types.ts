@@ -26,7 +26,10 @@ export interface Brc105Challenge {
 /** Minimal wallet interface for BRC-105 proof construction.
  *  Works with both CWIInterface (page context) and WalletInterface (SDK). */
 export interface Brc105Wallet {
-  getPublicKey(params: { protocolID: [number, string]; keyID: string; counterparty: string }): Promise<{ publicKey: string }>
+  getPublicKey(params:
+    | { protocolID: [number, string]; keyID: string; counterparty: string }
+    | { identityKey: true }
+  ): Promise<{ publicKey: string }>
   createHmac(params: { data: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ hmac: number[] }>
   createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
 }
@@ -34,7 +37,8 @@ export interface Brc105Wallet {
 export interface Brc105Proof {
   derivationPrefix: string
   derivationSuffix: string
-  transaction: string  // base64-encoded
+  transaction: string  // base64-encoded AtomicBEEF
+  clientIdentityKey: string  // client's compressed public key (hex)
   txid: string         // from wallet createAction result
 }
 

@@ -212,24 +212,25 @@ export async function constructBrc105Proof(
   wallet: Brc105Wallet,
   origin?: string,
 ): Promise<Brc105Proof> {
-  // Step 1: Generate derivation suffix
+  // Step 1: Get client's identity key (for inclusion in proof)
+  const { publicKey: clientIdentityKey } = await wallet.getPublicKey({ identityKey: true })
+
+  // Step 2: Generate derivation suffix
   const derivationSuffix = await createDerivationSuffix(wallet)
 
-  // Step 2: Derive the payee's public key via BRC-29
-  // In no-auth mode (no BRC-103), both client and server use "anyone" as
-  // counterparty. With BRC-103, the server's identity key is the counterparty.
-  const counterparty = challenge.authenticated ? challenge.serverIdentityKey : "anyone"
+  // Step 3: Derive the payee's public key via BRC-29
+  // BRC-105 requires mutual authentication — always use the server's identity key
   const keyID = `${challenge.derivationPrefix} ${derivationSuffix}`
   const { publicKey: derivedPublicKey } = await wallet.getPublicKey({
     protocolID: [2, "3241645161d8"],
     keyID,
-    counterparty,
+    counterparty: challenge.serverIdentityKey,
   })
 
-  // Step 3: Build P2PKH locking script
+  // Step 4: Build P2PKH locking script
   const lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
 
-  // Step 4: Create the payment transaction
+  // Step 5: Create the payment transaction
   const description = origin
     ? `Payment for request to ${origin}`
     : "BRC-105 payment"
@@ -250,7 +251,7 @@ export async function constructBrc105Proof(
     },
   })
 
-  // Step 5: Convert transaction to base64
+  // Step 6: Convert transaction to base64
   // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
   let transactionBase64: string
   if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
@@ -265,6 +266,7 @@ export async function constructBrc105Proof(
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix,
     transaction: transactionBase64,
+    clientIdentityKey,
     txid: result.txid,
   }
 }
