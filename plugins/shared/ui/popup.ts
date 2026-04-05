@@ -61,16 +61,27 @@ function updateWalletPanel(state: PopupState): void {
   setupContainer.hidden = true;
   lockBtn.style.display = "";
 
+  const unlockForm = document.getElementById("unlock-form") as HTMLDivElement | null;
+  const unlockPassword = document.getElementById("unlock-password") as HTMLInputElement | null;
+  const unlockError = document.getElementById("unlock-error") as HTMLDivElement | null;
+
   if (state.isUnlocked) {
     statusEl.textContent = "Unlocked";
     statusEl.className = "status unlocked";
     lockBtn.textContent = "Lock";
     lockBtn.className = "lock-btn unlocked";
+    if (unlockForm) unlockForm.hidden = true;
   } else {
     statusEl.textContent = "Locked";
     statusEl.className = "status locked";
     lockBtn.textContent = "Unlock";
     lockBtn.className = "lock-btn locked";
+    // Show password form automatically when locked
+    if (unlockForm && unlockPassword) {
+      unlockForm.hidden = false;
+      if (unlockError) unlockError.textContent = "";
+      if (!unlockPassword.value) unlockPassword.focus();
+    }
   }
 
   balanceEl.textContent =
@@ -197,9 +208,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   // Wallet: Lock / Unlock (guarded — wallet panel may not exist)
   const lockBtn = document.getElementById("lock-btn") as HTMLButtonElement | null;
-  const unlockForm = document.getElementById("unlock-form") as HTMLDivElement | null;
-  const unlockPassword = document.getElementById("unlock-password") as HTMLInputElement | null;
-  const unlockError = document.getElementById("unlock-error") as HTMLDivElement | null;
 
   if (lockBtn) {
     lockBtn.addEventListener("click", async () => {
@@ -212,16 +220,10 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (unlockForm) unlockForm.hidden = true;
         updateUI(state);
       } else {
-        // Show password field if hidden, submit if visible with value
-        if (unlockForm && unlockPassword) {
-          if (unlockForm.hidden) {
-            unlockForm.hidden = false;
-            unlockPassword.value = "";
-            if (unlockError) unlockError.textContent = "";
-            unlockPassword.focus();
-            return;
-          }
-
+        // Submit password
+        const unlockPassword = document.getElementById("unlock-password") as HTMLInputElement | null;
+        const unlockError = document.getElementById("unlock-error") as HTMLDivElement | null;
+        if (unlockPassword) {
           const password = unlockPassword.value;
           if (!password) {
             unlockPassword.focus();
@@ -231,7 +233,6 @@ document.addEventListener("DOMContentLoaded", async () => {
           lockBtn.disabled = true;
           try {
             const state = await sendMessage({ type: "unlock", payload: { password } });
-            unlockForm.hidden = true;
             unlockPassword.value = "";
             updateUI(state);
             fetchWalletInfo();
