@@ -216,11 +216,14 @@ export async function constructBrc105Proof(
   const derivationSuffix = await createDerivationSuffix(wallet)
 
   // Step 2: Derive the payee's public key via BRC-29
+  // In no-auth mode (no BRC-103), both client and server use "anyone" as
+  // counterparty. With BRC-103, the server's identity key is the counterparty.
+  const counterparty = challenge.authenticated ? challenge.serverIdentityKey : "anyone"
   const keyID = `${challenge.derivationPrefix} ${derivationSuffix}`
   const { publicKey: derivedPublicKey } = await wallet.getPublicKey({
     protocolID: [2, "3241645161d8"],
     keyID,
-    counterparty: challenge.serverIdentityKey,
+    counterparty,
   })
 
   // Step 3: Build P2PKH locking script

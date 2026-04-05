@@ -15,6 +15,7 @@ const CHALLENGE: Brc105Challenge = {
   satoshisRequired: 1000,
   serverIdentityKey: "02c0d1f9a09e0f6f5e1d8b3d3f9c6c5c1e4b2a0f8d7e6c5b4a3928170605041234",
   derivationPrefix: "AQID",
+  authenticated: false,
 }
 
 // Known compressed public key (33 bytes hex) for testing locking script derivation
@@ -138,16 +139,27 @@ describe("constructBrc105Proof", () => {
     expect(proof.txid).toBe("aabbccdd")
   })
 
-  it("calls getPublicKey with correct BRC-29 derivation parameters", async () => {
+  it("calls getPublicKey with 'anyone' counterparty in no-auth mode", async () => {
     const wallet = mockWallet()
     await constructBrc105Proof(CHALLENGE, wallet)
 
     expect(wallet.getPublicKey).toHaveBeenCalledOnce()
     const call = (wallet.getPublicKey as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(call.protocolID).toEqual([2, "3241645161d8"])
-    expect(call.counterparty).toBe(CHALLENGE.serverIdentityKey)
+    expect(call.counterparty).toBe("anyone")
     // keyID must be "${prefix} ${suffix}" (space-separated)
     expect(call.keyID).toMatch(new RegExp(`^${CHALLENGE.derivationPrefix} .+$`))
+  })
+
+  it("calls getPublicKey with server identity key counterparty in authenticated mode", async () => {
+    const wallet = mockWallet()
+    const authChallenge = { ...CHALLENGE, authenticated: true }
+    await constructBrc105Proof(authChallenge, wallet)
+
+    expect(wallet.getPublicKey).toHaveBeenCalledOnce()
+    const call = (wallet.getPublicKey as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(call.protocolID).toEqual([2, "3241645161d8"])
+    expect(call.counterparty).toBe(authChallenge.serverIdentityKey)
   })
 
   it("uses space-separated keyID format (static test vector)", async () => {

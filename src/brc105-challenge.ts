@@ -34,10 +34,10 @@ export function parseBrc105Challenge(response: Response): Brc105Challenge {
   // Accept identity key from BRC-103 auth layer or standalone BRC-105 header.
   // Treat empty values as absent so the fallback works when auth middleware
   // sends an empty header but the payment header has a valid key.
-  const serverIdentityKey =
-    response.headers.get("x-bsv-auth-identity-key") ||
-    response.headers.get("x-bsv-payment-identity-key") ||
-    null
+  const authIdentityKey = response.headers.get("x-bsv-auth-identity-key") || null
+  const paymentIdentityKey = response.headers.get("x-bsv-payment-identity-key") || null
+  const authenticated = authIdentityKey !== null && authIdentityKey.length > 0
+  const serverIdentityKey = authIdentityKey || paymentIdentityKey
   if (serverIdentityKey === null || serverIdentityKey.length === 0) {
     throw new Error("BRC-105: missing identity key (expected x-bsv-auth-identity-key or x-bsv-payment-identity-key)")
   }
@@ -55,5 +55,6 @@ export function parseBrc105Challenge(response: Response): Brc105Challenge {
     satoshisRequired,
     serverIdentityKey,
     derivationPrefix,
+    authenticated,
   }
 }
