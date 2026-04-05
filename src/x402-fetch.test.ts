@@ -381,6 +381,7 @@ function mockBrc105ProofConstructor(): (challenge: Brc105Challenge) => Promise<B
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix: "mock-suffix",
     transaction: "bW9jay10eA==", // "mock-tx" in base64
+    clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
     txid: "brc105-mock-txid",
   }))
 }
