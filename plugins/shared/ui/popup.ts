@@ -80,7 +80,7 @@ function updateWalletPanel(state: PopupState): void {
     if (unlockForm && unlockPassword) {
       unlockForm.hidden = false;
       if (unlockError) unlockError.textContent = "";
-      unlockPassword.focus();
+      if (!unlockPassword.value) unlockPassword.focus();
     }
   }
 
