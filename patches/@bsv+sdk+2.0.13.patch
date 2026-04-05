@@ -1,0 +1,76 @@
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/BinaryFetchClient.js b/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/BinaryFetchClient.js
+index fef0036..de7a1bb 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/BinaryFetchClient.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/BinaryFetchClient.js
+@@ -46,9 +46,13 @@ function binaryHttpClient() {
+         }
+     };
+     if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+-        // Use fetch in a browser environment
++        // Browser tab/page context
+         return new BinaryFetchClient(window.fetch.bind(window));
+     }
++    else if (typeof globalThis.fetch === 'function') {
++        // Service workers, Deno, Node 18+
++        return new BinaryFetchClient(globalThis.fetch.bind(globalThis));
++    }
+     else if (typeof require !== 'undefined') {
+         // Use Node https module
+         // eslint-disable-next-line
+diff --git a/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/DefaultHttpClient.js b/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/DefaultHttpClient.js
+index 9ddbd32..9f7be15 100644
+--- a/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/DefaultHttpClient.js
++++ b/node_modules/@bsv/sdk/dist/cjs/src/transaction/http/DefaultHttpClient.js
+@@ -15,9 +15,13 @@ function defaultHttpClient() {
+         }
+     };
+     if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+-        // Use fetch in a browser environment
++        // Browser tab/page context
+         return new FetchHttpClient_js_1.FetchHttpClient(window.fetch.bind(window));
+     }
++    else if (typeof globalThis.fetch === 'function') {
++        // Service workers, Deno, Node 18+
++        return new FetchHttpClient_js_1.FetchHttpClient(globalThis.fetch.bind(globalThis));
++    }
+     else if (typeof require !== 'undefined') {
+         // Use Node https module
+         // eslint-disable-next-line
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/transaction/http/BinaryFetchClient.js b/node_modules/@bsv/sdk/dist/esm/src/transaction/http/BinaryFetchClient.js
+index ca11bc0..a390b06 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/transaction/http/BinaryFetchClient.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/transaction/http/BinaryFetchClient.js
+@@ -42,9 +42,13 @@ export function binaryHttpClient() {
+         }
+     };
+     if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+-        // Use fetch in a browser environment
++        // Browser tab/page context
+         return new BinaryFetchClient(window.fetch.bind(window));
+     }
++    else if (typeof globalThis.fetch === 'function') {
++        // Service workers, Deno, Node 18+
++        return new BinaryFetchClient(globalThis.fetch.bind(globalThis));
++    }
+     else if (typeof require !== 'undefined') {
+         // Use Node https module
+         // eslint-disable-next-line
+diff --git a/node_modules/@bsv/sdk/dist/esm/src/transaction/http/DefaultHttpClient.js b/node_modules/@bsv/sdk/dist/esm/src/transaction/http/DefaultHttpClient.js
+index 77d580a..8cea149 100644
+--- a/node_modules/@bsv/sdk/dist/esm/src/transaction/http/DefaultHttpClient.js
++++ b/node_modules/@bsv/sdk/dist/esm/src/transaction/http/DefaultHttpClient.js
+@@ -12,9 +12,13 @@ export function defaultHttpClient() {
+         }
+     };
+     if (typeof window !== 'undefined' && typeof window.fetch === 'function') {
+-        // Use fetch in a browser environment
++        // Browser tab/page context
+         return new FetchHttpClient(window.fetch.bind(window));
+     }
++    else if (typeof globalThis.fetch === 'function') {
++        // Service workers, Deno, Node 18+
++        return new FetchHttpClient(globalThis.fetch.bind(globalThis));
++    }
+     else if (typeof require !== 'undefined') {
+         // Use Node https module
+         // eslint-disable-next-line
