@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.1] - 2026-04-05
+
+### Added
+
+- **Balance polling** — popup refreshes balance every 10 seconds (#72)
+- **Auto-show password field** — password input shown automatically when wallet is locked (#77)
+
+### Fixed
+
+- **BRC-105 auth header** — client identity key now sent as `x-bsv-auth-identity-key` HTTP header alongside the `x-bsv-payment` JSON (#71)
+- **ARC fee model** — set 100 sat/kb (ARC minimum) instead of wallet-toolbox default of 1 sat/kb (#74)
+- **UTXO sweep retry** — removed outpoint dedup tracking; scan imports all on-chain UTXOs on every unlock, letting the wallet handle dedup naturally (#68)
+- **@bsv/sdk service worker HTTP** — patch-package fix for `defaultHttpClient()` to detect `globalThis.fetch` in service worker contexts (upstream: bsv-blockchain/ts-sdk#510)
+
 ## [0.4.0] - 2026-04-05
 
 ### Added

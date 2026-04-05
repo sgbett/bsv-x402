@@ -1,6 +1,6 @@
 {
   "name": "bsv-x402",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "x402 payment protocol client — a fetch() wrapper that handles 402 payment flows transparently",
   "type": "module",
   "main": "dist/index.cjs",
@@ -26,7 +26,8 @@
     "build:safari": "tsx plugins/build.ts --target safari",
     "build:all": "npm run build && npm run build:plugins",
     "demo": "npm run build && tsx demo/server.ts",
-    "docs": "typedoc"
+    "docs": "typedoc",
+    "postinstall": "patch-package"
   },
   "repository": {
     "type": "git",
@@ -37,6 +38,7 @@
     "@types/chrome": "^0.1.38",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
+    "patch-package": "^8.0.1",
     "tsup": "^8.0.0",
     "tsx": "^4.21.0",
     "typedoc": "^0.28.18",
