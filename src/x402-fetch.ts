@@ -1,17 +1,10 @@
 import { parseBrc105Challenge } from "./brc105-challenge"
 import { constructBrc105Proof } from "./brc105-proof"
 import { parseChallenge } from "./challenge"
-import { RateLimiter, resolveSpendLimits } from "./limits"
-import { resolveSitePolicy } from "./site-policy"
-import { LocalStorageAdapter } from "./storage"
 import type {
   Brc105Challenge,
   Challenge,
-  LimitCheckResult,
-  PaymentRequest,
   Proof,
-  StorageAdapter,
-  TwoFactorProvider,
   X402Config,
 } from "./types"
 
@@ -112,179 +105,16 @@ async function defaultConstructProof(challenge: Challenge): Promise<Proof> {
   }
 }
 
-// === Promise mutex for serialising payment flows ===
-
-function createMutex() {
-  let chain = Promise.resolve()
-  return <T>(fn: () => Promise<T>): Promise<T> => {
-    const result = chain.then(fn, fn)
-    chain = result.then(() => {}, () => {})
-    return result as Promise<T>
-  }
-}
-
 // === Factory ===
 
-export interface X402FetchFn {
-  (input: RequestInfo | URL, init?: RequestInit): Promise<Response>
-  resetLimits(): Promise<void>
-  getState(): { entries: unknown[]; circuitBroken: boolean }
-}
+export type X402FetchFn = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
 export function createX402Fetch(config: X402Config = {}): X402FetchFn {
-  const tier = config.tier ?? "Hey, Not Too Rough"
-  const mode = config.mode ?? "interactive"
-
-  // Validate Nightmare confirmation
-  if (tier === "Nightmare!" && config.nightmareConfirmation !== "NIGHTMARE") {
-    throw new Error('Nightmare! tier requires nightmareConfirmation: "NIGHTMARE"')
-  }
-
-  const limits = resolveSpendLimits(tier, mode, config.limits)
-  const storage: StorageAdapter = config.storage ?? new LocalStorageAdapter()
-  const twoFactor = config.twoFactorProvider
   const constructProof = config.proofConstructor ?? defaultConstructProof
   const brc105ProofConstructor = config.brc105ProofConstructor
   const brc105Wallet = config.brc105Wallet
-  const nowFn = config.now ?? Date.now
-  const mutex = createMutex()
 
-  // Warn if tier requires 2FA but no provider is configured
-  const needs2fa = limits.require2fa
-  if (!twoFactor && (needs2fa.onCircuitBreakerReset || needs2fa.onHighValueTx || needs2fa.onNewSiteApproval || needs2fa.onTierChange)) {
-    console.warn("x402: tier requires 2FA but no twoFactorProvider configured — 2FA-gated actions will be blocked")
-  }
-
-  let limiter: RateLimiter | undefined
-  let initialised = false
-
-  async function ensureInitialised(): Promise<RateLimiter> {
-    if (limiter && initialised) return limiter
-    const state = await storage.load()
-    limiter = new RateLimiter(limits, state ?? undefined, nowFn)
-    // Load persisted site policies into limits
-    const policies = await storage.loadSitePolicies()
-    Object.assign(limits.sitePolicies, policies)
-    initialised = true
-    return limiter
-  }
-
-  async function persist(rl: RateLimiter): Promise<void> {
-    await storage.save(rl.getState())
-    await storage.saveSitePolicies(limits.sitePolicies)
-  }
-
-  /**
-   * Shared payment flow for both custom (X402) and BRC-105 protocols.
-   * Handles site policy, rate limiting, 2FA, yellow-light, proof construction, and retry.
-   */
-  async function handlePaymentFlow<P>(
-    originalResponse: Response,
-    input: RequestInfo | URL,
-    init: RequestInit | undefined,
-    origin: string,
-    amount: number,
-    protocol: import("./types").PaymentProtocol,
-    buildProof: () => Promise<P>,
-    retryWithProof: (proof: P) => Promise<Response>,
-    makeLedgerEntry: (proof: P) => import("./types").LedgerEntry,
-  ): Promise<Response> {
-    return mutex(async () => {
-      const rl = await ensureInitialised()
-
-      // Resolve per-site policy (may prompt on first visit)
-      const sitePolicy = await resolveSitePolicy(origin, limits, twoFactor)
-      if (sitePolicy.action === "block") return originalResponse
-
-      // Persist new site policy if it was just created
-      if (!limits.sitePolicies[origin]) {
-        limits.sitePolicies[origin] = sitePolicy
-        await storage.saveSitePolicies(limits.sitePolicies)
-      }
-
-      // Build a SpendCheckable for the rate limiter
-      const spendCheckable: PaymentRequest = { amount, origin, protocol }
-      const result: LimitCheckResult = rl.check(spendCheckable, origin)
-
-      if (result.action === "block") {
-        if (result.severity === "trip") {
-          rl.trip()
-          await persist(rl)
-          config.onLimitReached?.(result.reason)
-          return originalResponse
-        }
-
-        // Window blocks can be overridden with 2FA (one-shot exception)
-        if (result.severity === "window" && twoFactor) {
-          config.onLimitReached?.(result.reason)
-          const override = await twoFactor.verify({
-            type: "limit-override",
-            amount,
-            origin,
-            reason: result.reason,
-          })
-          if (override) {
-            // User approved — proceed with this one payment
-          } else {
-            return originalResponse
-          }
-        } else {
-          config.onLimitReached?.(result.reason)
-          return originalResponse
-        }
-      }
-
-      if (result.action === "yellow-light") {
-        const proceed = config.onYellowLight
-          ? await config.onYellowLight(result.detail)
-          : false
-        if (!proceed) return originalResponse
-      }
-
-      // 2FA for high-value tx
-      if (limits.require2fa.onHighValueTx && amount > limits.require2fa.highValueThreshold) {
-        if (!twoFactor) return originalResponse // no provider → block
-        const verified = await twoFactor.verify({
-          type: "high-value-tx",
-          amount,
-          origin,
-        })
-        if (!verified) return originalResponse
-      }
-
-      // Construct proof and retry
-      let proof: P
-      try {
-        proof = await buildProof()
-      } catch (err) {
-        console.error(`[x402] Proof construction failed (${protocol}):`, err)
-        config.onProofError?.(err, protocol)
-        return originalResponse
-      }
-
-      // Record the payment
-      rl.record(makeLedgerEntry(proof))
-      await persist(rl)
-
-      // Retry the paid request with backoff (up to 3 attempts)
-      const maxAttempts = 3
-      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          return await retryWithProof(proof)
-        } catch (err) {
-          if (attempt >= maxAttempts) {
-            console.error(`[x402] Paid request failed after ${maxAttempts} attempts (${protocol}):`, err)
-            return originalResponse
-          }
-          // Exponential backoff: 500ms, 1000ms
-          await new Promise((r) => setTimeout(r, 250 * Math.pow(2, attempt)))
-        }
-      }
-      return originalResponse // unreachable, but satisfies TypeScript
-    })
-  }
-
-  const fetchFn: X402FetchFn = async function x402Fetch(
+  return async function x402Fetch(
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> {
@@ -305,22 +135,18 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         return response
       }
 
-      return handlePaymentFlow(
-        response, input, init, origin,
-        challenge.amount, "x402",
-        async () => constructProof(challenge),
-        (proof) => {
-          const headers = new Headers(init?.headers)
-          headers.set("X402-Proof", JSON.stringify(proof))
-          return fetch(input, { ...init, headers })
-        },
-        (proof) => ({
-          timestamp: nowFn(),
-          origin,
-          satoshis: challenge.amount,
-          txid: (proof as Proof).txid,
-        }),
-      )
+      let proof: Proof
+      try {
+        proof = await constructProof(challenge)
+      } catch (err) {
+        console.error("[x402] Proof construction failed (x402):", err)
+        config.onProofError?.(err, "x402")
+        return response
+      }
+
+      const headers = new Headers(init?.headers)
+      headers.set("X402-Proof", JSON.stringify(proof))
+      return fetch(input, { ...init, headers })
     }
 
     // BRC-105 protocol: x-bsv-payment-version header present
@@ -337,53 +163,28 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         return response
       }
 
-      return handlePaymentFlow(
-        response, input, init, origin,
-        brc105Challenge.satoshisRequired, "brc105",
-        async () => {
-          if (brc105ProofConstructor) {
-            return brc105ProofConstructor(brc105Challenge)
-          }
-          return constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
-        },
-        (proof) => {
-          const headers = new Headers(init?.headers)
-          headers.set("x-bsv-payment", JSON.stringify(proof))
-          headers.set("x-bsv-auth-identity-key", (proof as import("./types").Brc105Proof).clientIdentityKey)
-          return fetch(input, { ...init, headers })
-        },
-        (proof) => ({
-          timestamp: nowFn(),
-          origin,
-          satoshis: brc105Challenge.satoshisRequired,
-          txid: (proof as import("./types").Brc105Proof).txid,
-          protocol: "brc105" as const,
-        }),
-      )
+      let proof: import("./types").Brc105Proof
+      try {
+        if (brc105ProofConstructor) {
+          proof = await brc105ProofConstructor(brc105Challenge)
+        } else {
+          proof = await constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
+        }
+      } catch (err) {
+        console.error("[x402] Proof construction failed (brc105):", err)
+        config.onProofError?.(err, "brc105")
+        return response
+      }
+
+      const headers = new Headers(init?.headers)
+      headers.set("x-bsv-payment", JSON.stringify(proof))
+      headers.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
+      return fetch(input, { ...init, headers })
     }
 
     // Neither protocol header present — pass through
     return response
   }
-
-  fetchFn.resetLimits = async () => {
-    const rl = await ensureInitialised()
-    if (limits.require2fa.onCircuitBreakerReset) {
-      if (!twoFactor) throw new Error("2FA required for circuit breaker reset but no twoFactorProvider configured")
-      const verified = await twoFactor.verify({ type: "circuit-breaker-reset" })
-      if (!verified) throw new Error("2FA verification failed for circuit breaker reset")
-    }
-    rl.reset()
-    await persist(rl)
-  }
-
-  fetchFn.getState = () => {
-    if (!limiter) return { entries: [], circuitBroken: false }
-    const state = limiter.getState()
-    return { entries: state.entries, circuitBroken: state.circuitBroken }
-  }
-
-  return fetchFn
 }
 
 // === Bare x402Fetch for backwards compatibility ===
