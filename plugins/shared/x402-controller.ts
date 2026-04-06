@@ -26,8 +26,8 @@ import type {
 // ---------------------------------------------------------------------------
 
 let config: AutospendConfig = {
-  tier: 'Hey, Not Too Rough',
-  weapon: 'Pistol',
+  tier: 'Hurt Me Plenty',
+  weapon: 'Shotgun',
 }
 
 // Start with tier cap; will be clamped to wallet balance when we know it.

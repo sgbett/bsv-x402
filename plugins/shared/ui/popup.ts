@@ -204,11 +204,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       isSetUp: false,
       isUnlocked: false,
       network: "mainnet",
-      tier: "Hey, Not Too Rough",
-      weapon: "Pistol",
+      tier: "Hurt Me Plenty",
+      weapon: "Shotgun",
       autospendBalance: 0,
-      tierCap: 10_000_000,
-      weaponCap: 500_000,
+      tierCap: 100_000_000,
+      weaponCap: 1_000_000,
     });
   }
 
