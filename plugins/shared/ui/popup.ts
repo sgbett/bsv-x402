@@ -217,7 +217,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
       if (isCurrentlyUnlocked) {
         const state = await sendMessage({ type: "lock" });
-        if (unlockForm) unlockForm.hidden = true;
         updateUI(state);
       } else {
         // Submit password
@@ -246,8 +245,9 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
 
     // Allow Enter key to submit password
-    if (unlockPassword) {
-      unlockPassword.addEventListener("keydown", (e) => {
+    const passwordInput = document.getElementById("unlock-password") as HTMLInputElement | null;
+    if (passwordInput) {
+      passwordInput.addEventListener("keydown", (e) => {
         if (e.key === "Enter") lockBtn.click();
       });
     }
