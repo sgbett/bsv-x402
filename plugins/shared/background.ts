@@ -313,8 +313,17 @@ chrome.runtime.onMessage.addListener(
       return true
     }
 
-    // Approval response from approve.html popup — allowed from our own extension
+    // Approval response — only accepted from our own approve.html popup.
+    // The id is a capability-bearing UUID, but we still validate the sender
+    // URL to prevent any other extension page (or future content-script
+    // relay) from resolving approvals.
     if (isInternalMessage(message) && message.type === 'approvalResponse') {
+      const isFromApprovePopup = sender.id === chrome.runtime.id
+        && sender.url?.startsWith(chrome.runtime.getURL('ui/x402/approve.html'))
+      if (!isFromApprovePopup) {
+        sendResponse({ ok: false, error: 'Unauthorised sender' })
+        return true
+      }
       const payload = message.payload as { id?: string; approved?: boolean } | undefined
       if (payload?.id && typeof payload.approved === 'boolean') {
         resolveApproval(payload.id, payload.approved)
