@@ -76,12 +76,14 @@ export class BuiltInWalletBackend implements WalletBackend {
 
     // Delegate to the wallet-toolbox Wallet instance
     // All BRC-100 methods follow the pattern: wallet.method(args, originator?)
+    // No originator — the built-in wallet is ours, not an external app.
+    // Our CWI proxy handles spending limits; the wallet doesn't need to gate.
     const fn = (this.wallet as unknown as Record<string, Function>)[method]
     if (typeof fn !== 'function') {
       throw new Error(`Wallet does not implement method: ${method}`)
     }
 
-    return fn.call(this.wallet, params ?? {}, origin || undefined)
+    return fn.call(this.wallet, params ?? {})
   }
 
   async isAuthenticated(): Promise<boolean> {
