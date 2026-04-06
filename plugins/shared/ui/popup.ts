@@ -137,6 +137,10 @@ function sendMessage(msg: Record<string, unknown>): Promise<PopupState> {
   });
 }
 
+// Build-time constants injected by tsup --define
+declare const __X402_VERSION__: string;
+declare const __X402_GIT_REF__: string;
+
 // ---------------------------------------------------------------------------
 // Initialisation
 // ---------------------------------------------------------------------------
@@ -194,6 +198,12 @@ document.addEventListener("DOMContentLoaded", async () => {
       network: "mainnet",
       tier: "Hey, Not Too Rough",
     });
+  }
+
+  // Display version + git ref in footer
+  const versionEl = document.getElementById("version-info");
+  if (versionEl) {
+    versionEl.textContent = `v${__X402_VERSION__} (${__X402_GIT_REF__})`;
   }
 
   // Poll balance every 10s while popup is open
