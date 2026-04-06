@@ -158,8 +158,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       let brc105Challenge: Brc105Challenge
       try {
         brc105Challenge = parseBrc105Challenge(response)
-      } catch (err) {
-        console.error("[x402] Failed to parse BRC-105 challenge:", err instanceof Error ? err.message : err)
+      } catch {
+        // Malformed or unsupported version — treat as non-payable
         return response
       }
 
