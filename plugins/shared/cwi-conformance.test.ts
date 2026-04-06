@@ -141,9 +141,13 @@ function makeMessage(method: CWIMethodName, params: unknown = {}): ContentToBack
 // ---------------------------------------------------------------------------
 
 vi.mock('./x402-controller', () => ({
-  checkSpendLimits: vi.fn().mockResolvedValue({ allowed: true }),
-  recordPayment: vi.fn().mockResolvedValue(undefined),
-  getSpendStatus: vi.fn().mockResolvedValue({ spent: 0, limit: 0, window: 'day', percentage: 0, circuitBroken: false }),
+  checkSpendLimits: vi.fn().mockReturnValue({ allowed: true }),
+  recordPayment: vi.fn(),
+  getSpendStatus: vi.fn().mockReturnValue({ balance: 0, tierCap: 0, percentage: 0 }),
+}))
+
+vi.mock('./pending-approvals', () => ({
+  requestApproval: vi.fn().mockResolvedValue(true),
 }))
 
 // Import the mocked functions so we can inspect/reset them
@@ -438,8 +442,12 @@ describe('CWI conformance: spending limits', () => {
     expect(challenge.amount).toBe(500)
   })
 
-  it('createAction is blocked when spending limit is exceeded', async () => {
-    mockCheckSpendLimits.mockResolvedValueOnce({ allowed: false, reason: 'Daily limit exceeded' })
+  it('createAction is blocked when user denies confirmation', async () => {
+    // Over the autospend cap — requires confirmation
+    mockCheckSpendLimits.mockReturnValueOnce({ allowed: false, requiresConfirmation: true })
+    // User denies
+    const { requestApproval } = await import('./pending-approvals')
+    vi.mocked(requestApproval).mockResolvedValueOnce(false)
 
     const msg = makeMessage('createAction', {
       description: 'test',
@@ -448,7 +456,7 @@ describe('CWI conformance: spending limits', () => {
     const response = await handleCWIRequest(msg, backend)
 
     expect(response.status).toBe('error')
-    expect(response.error).toContain('Daily limit exceeded')
+    expect(response.error).toContain('denied')
     // Backend should NOT have been called
     expect(backend.calls).toHaveLength(0)
   })
@@ -460,7 +468,7 @@ describe('CWI conformance: spending limits', () => {
     })
     await handleCWIRequest(msg, backend)
 
-    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 100, 'deadbeef')
+    expect(mockRecordPayment).toHaveBeenCalledWith(100)
   })
 
   it('non-createAction methods skip spending limits entirely', async () => {
@@ -533,11 +541,13 @@ describe('CWI conformance: BRC-105 proof construction flow', () => {
     expect(response.result).toHaveProperty('txid')
     expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
     expect(mockCheckSpendLimits.mock.calls[0][0].amount).toBe(250)
-    expect(mockRecordPayment).toHaveBeenCalledWith('https://example.com', 250, 'deadbeef')
+    expect(mockRecordPayment).toHaveBeenCalledWith(250)
   })
 
-  it('createAction with BRC-105 params is blocked when spending limit exceeded', async () => {
-    mockCheckSpendLimits.mockResolvedValueOnce({ allowed: false, reason: 'Per-transaction limit exceeded' })
+  it('createAction with BRC-105 params is blocked when user denies confirmation', async () => {
+    mockCheckSpendLimits.mockReturnValueOnce({ allowed: false, requiresConfirmation: true })
+    const { requestApproval } = await import('./pending-approvals')
+    vi.mocked(requestApproval).mockResolvedValueOnce(false)
 
     const msg = makeMessage('createAction', {
       description: 'BRC-105 payment',
@@ -556,7 +566,7 @@ describe('CWI conformance: BRC-105 proof construction flow', () => {
     const response = await handleCWIRequest(msg, backend)
 
     expect(response.status).toBe('error')
-    expect(response.error).toContain('Per-transaction limit exceeded')
+    expect(response.error).toContain('denied')
     expect(backend.calls).toHaveLength(0)
   })
 
