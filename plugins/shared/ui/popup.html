@@ -54,13 +54,11 @@
     </div>
 
     <!-- ============================================================
-         x402 panel — always shown regardless of wallet backend.
-         Spending limits, tier selection, per-site policies.
+         x402 panel — autospend controls
          ============================================================ -->
     <div id="x402-panel">
       <section class="tier">
-        <label>Spending Tier</label>
-        <span id="current-tier" class="tier-name">Hey, Not Too Rough</span>
+        <label>Difficulty</label>
         <select id="tier-select">
           <option value="I'm Too Young to Die">I'm Too Young to Die</option>
           <option value="Hey, Not Too Rough" selected>Hey, Not Too Rough</option>
@@ -70,9 +68,40 @@
         </select>
       </section>
 
-      <section class="limits">
-        <label>Spend Limits</label>
-        <div id="limits-summary" class="limits-summary">No active limits</div>
+      <section class="weapon">
+        <label>Weapon (per-tx max)</label>
+        <select id="weapon-select">
+          <option value="Fists">Fists (100k sats)</option>
+          <option value="Chainsaw">Chainsaw (250k sats)</option>
+          <option value="Pistol" selected>Pistol (500k sats)</option>
+          <option value="Shotgun">Shotgun (1M sats)</option>
+          <option value="Super Shotgun">Super Shotgun (10M sats)</option>
+          <option value="Chaingun">Chaingun (50M sats)</option>
+          <option value="Rocket Launcher">Rocket Launcher (250M sats)</option>
+          <option value="Plasma Rifle">Plasma Rifle (1B sats)</option>
+          <option value="BFG9000">BFG9000 (no limit)</option>
+        </select>
+      </section>
+
+      <section class="autospend">
+        <label>Autospend Balance</label>
+        <div class="health-bar">
+          <div id="health-bar-fill" class="health-bar-fill"></div>
+        </div>
+        <div class="autospend-text">
+          <span id="autospend-value">-- sats</span>
+          <span id="autospend-cap">/ -- sats</span>
+        </div>
+      </section>
+
+      <section class="pickups">
+        <label>Pickups</label>
+        <div class="pickup-buttons">
+          <button class="pickup-btn" data-pickup="Medkit">Medkit +10%</button>
+          <button class="pickup-btn" data-pickup="Stimpak">Stimpak +25%</button>
+          <button class="pickup-btn" data-pickup="Soul Sphere">Soul Sphere +100%</button>
+          <button class="pickup-btn new-game" data-pickup="New Game">New Game</button>
+        </div>
       </section>
 
       <section class="indicator-mode">
