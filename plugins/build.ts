@@ -3,12 +3,18 @@ import { cpSync, mkdirSync, existsSync, renameSync, readdirSync } from 'fs'
 import { resolve, join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
+import { readFileSync } from 'fs'
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 const ROOT = resolve(__dirname, '..')
 const PLUGINS = resolve(__dirname)
 const DIST = resolve(ROOT, 'dist', 'plugins')
 const SHARED = resolve(PLUGINS, 'shared')
+
+// Build-time constants for version display
+const PKG_VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
+const GIT_REF = execSync('git rev-parse --short HEAD', { cwd: ROOT }).toString().trim()
 
 type Target = 'chromium' | 'firefox' | 'safari'
 const ALL_TARGETS: Target[] = ['chromium', 'firefox', 'safari']
@@ -54,7 +60,7 @@ function buildTarget(target: Target) {
   for (const { src, outDir: scriptOutDir } of uiScripts) {
     if (existsSync(src)) {
       mkdirSync(scriptOutDir, { recursive: true })
-      execSync(`npx tsup ${src} --out-dir ${scriptOutDir} --format iife --target es2020 --no-splitting --no-dts --clean false`, { cwd: ROOT, stdio: 'inherit' })
+      execSync(`npx tsup ${src} --out-dir ${scriptOutDir} --format iife --target es2020 --no-splitting --no-dts --clean false --define.__X402_VERSION__ '"${PKG_VERSION}"' --define.__X402_GIT_REF__ '"${GIT_REF}"'`, { cwd: ROOT, stdio: 'inherit' })
     }
   }
 
