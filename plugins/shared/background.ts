@@ -246,6 +246,9 @@ chrome.runtime.onMessage.addListener(
         return true
       }
 
+      // Reset idle timer — wallet is actively being used
+      chrome.alarms.create('auto-lock', { periodInMinutes: 15 })
+
       handleCWIRequest(message, wallet.getBackend(), sender.tab?.id)
         .then((response) => sendResponse(response))
         .catch((err) => {
