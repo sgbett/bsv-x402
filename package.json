@@ -31,7 +31,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/sgbett/bsv-x402.git"
+    "url": "git+https://github.com/sgbett/bsv-x402.git"
   },
   "devDependencies": {
     "@bsv/wallet-toolbox-client": "^2.1.17",
