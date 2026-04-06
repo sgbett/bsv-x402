@@ -7,25 +7,23 @@ export { parseChallenge } from "./challenge"
 export { parseBrc105Challenge } from "./brc105-challenge"
 export { constructBrc105Proof } from "./brc105-proof"
 
-// Rate limiter and tier presets
-export { RateLimiter, TIER_PRESETS, resolveSpendLimits } from "./limits"
-export { BFG_DAILY_CEILING_SATOSHIS, BFG_PER_TX_CEILING_SATOSHIS } from "./limits"
-export type { SpendCheckable } from "./limits"
-
-// Storage
-export { LocalStorageAdapter } from "./storage"
-export type { KeyDeriver } from "./storage"
-
-// 2FA
-export { WalletTwoFactorProvider } from "./two-factor"
-
-// Site policy
-export { resolveSitePolicy } from "./site-policy"
-export type { SitePromptFn } from "./site-policy"
+// Autospend (tier + weapon + health bar)
+export {
+  TIER_CAPS,
+  WEAPON_CAPS,
+  PICKUP_PERCENTAGES,
+  checkPayment,
+  recordPayment,
+  applyPickup,
+  clampBalanceToTier,
+  initialState,
+} from "./autospend"
+export type { PaymentDecision } from "./autospend"
 
 // Types
 export type {
-  BlockSeverity,
+  AutospendConfig,
+  AutospendState,
   Brc105Challenge,
   Brc105Proof,
   Brc105ProofConstructor,
@@ -34,24 +32,11 @@ export type {
   CWICreateActionOutput,
   CWICreateActionParams,
   CWICreateActionResult,
-  LedgerEntry,
-  LimitCheckResult,
-  LimitState,
   PaymentProtocol,
   PaymentRequest,
+  PickupName,
   Proof,
-  SitePolicy,
-  SitePolicyAction,
-  SpendLimits,
-  SpendMode,
-  StorageAdapter,
   TierName,
-  TierPreset,
-  TimeWindow,
-  TwoFactorAction,
-  TwoFactorPolicy,
-  TwoFactorProvider,
-  WindowLimit,
+  WeaponName,
   X402Config,
-  YellowLightEvent,
 } from "./types"
