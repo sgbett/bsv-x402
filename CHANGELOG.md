@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0] - 2026-04-06
+
+### Changed
+
+- **BREAKING: Removed library rate limiter** — `createX402Fetch` no longer accepts tier, limits, 2FA, storage, site policy, or yellow-light config. Spending controls are enforced by the extension's CWI proxy only. The library is now a thin fetch wrapper + proof constructor. (#87)
+- **`X402FetchFn`** simplified to a plain fetch function type (no more `resetLimits()` or `getState()` methods)
+
+### Fixed
+
+- **Wallet approval gates removed** — built-in wallet backend no longer passes page origin as originator, preventing wallet-toolbox's internal approval limits from blocking mid-gameplay (#82)
+- **Auto-lock reset on activity** — idle timer resets on every CWI call so the wallet only locks after 15 minutes of genuine idle (#80)
+- **Popup variable references** — fixed broken `unlockForm` and `unlockPassword` references from PR #78 refactor (#79, #83)
+
 ## [0.4.1] - 2026-04-05
 
 ### Added
