@@ -108,19 +108,10 @@ export interface TierPreset {
 // === Factory config ===
 
 export interface X402Config {
-  tier?: TierName
-  mode?: SpendMode
-  limits?: Partial<SpendLimits>
-  storage?: StorageAdapter
-  twoFactorProvider?: TwoFactorProvider
   proofConstructor?: (challenge: Challenge) => Promise<Proof>
   brc105ProofConstructor?: Brc105ProofConstructor
   brc105Wallet?: Brc105Wallet
-  nightmareConfirmation?: string
-  onLimitReached?: (reason: string) => void
-  onYellowLight?: (detail: YellowLightEvent) => Promise<boolean>
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
-  now?: () => number
 }
 
 // === Rate limiter ===
