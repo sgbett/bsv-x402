@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.0] - 2026-04-07
+
+### Changed
+
+- **BREAKING: Autospend redesign** — replaced rate-limiter-based spending controls with a Doom-themed autospend model: tier sets max balance, weapon sets per-tx max, balance decreases with payments and is restored via Medkit/Stimpak/Soul Sphere/New Game pickups (#91)
+- **Library API**: removed `RateLimiter`, `resolveSpendLimits`, tier presets, `SpendLimits`, `WindowLimit`, `TwoFactorProvider`, `LedgerEntry`, `StorageAdapter`, `LocalStorageAdapter`, `resolveSitePolicy`, `WalletTwoFactorProvider`, `BFG_DAILY_CEILING_SATOSHIS`, `BFG_PER_TX_CEILING_SATOSHIS` and related types
+- **New library exports**: `TIER_CAPS`, `WEAPON_CAPS`, `PICKUP_PERCENTAGES`, `checkPayment`, `recordPayment`, `applyPickup`, `clampBalanceToTier`, `initialState`, `AutospendConfig`, `AutospendState`, `WeaponName`, `PickupName`
+- **Popup UI**: difficulty selector, weapon selector, autospend health bar, pickup buttons (Medkit +10%, Stimpak +25%, Soul Sphere +100%, New Game)
+- **Approval flow**: payments exceeding `min(weapon, balance)` open `approve.html` in a popup window for Y/N confirmation (60s auto-deny)
+- **Spend indicator**: now shows autospend balance as a health bar (green/yellow/red) instead of spent/limit
+- **Default tier/weapon**: Hurt Me Plenty / Shotgun
+
+### Fixed
+
+- **Approval handler sender validation** — `approvalResponse` message handler now requires sender URL to be the approve.html popup (defence in depth)
+- **Approval timeout** — auto-deny after 65s if no response, or if `chrome.windows.create` fails (prevents the payment promise from hanging)
+- **Input validation** — `checkPayment`/`recordPayment` reject NaN/Infinity/negative/zero amounts; `getWalletBalance` safely coerces with finite check
+
 ## [0.5.0] - 2026-04-06
 
 ### Changed
