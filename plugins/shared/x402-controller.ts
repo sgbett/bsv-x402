@@ -1,121 +1,111 @@
 /// <reference types="chrome" />
 
-import { ExtensionStorageAdapter } from './storage-bridge'
-import { RateLimiter, resolveSpendLimits } from '../../src/limits'
-import type { SpendCheckable } from '../../src/limits'
-import type { LimitCheckResult, SpendMode, TierName } from '../../src/types'
+import {
+  TIER_CAPS,
+  WEAPON_CAPS,
+  checkPayment,
+  recordPayment as recordPaymentFn,
+  applyPickup as applyPickupFn,
+  clampBalanceToTier as clampFn,
+  initialState,
+} from '../../src/autospend'
+import type {
+  AutospendConfig,
+  AutospendState,
+  PickupName,
+  PaymentRequest,
+  TierName,
+  WeaponName,
+} from '../../src/types'
 
 // ---------------------------------------------------------------------------
-// Spending limits controller
+// Autospend controller
 //
-// Owns tier configuration, the rate limiter, and spend-limit storage.
-// Protocol-agnostic — accepts both x402 Challenges and PaymentRequests.
+// Owns the autospend config (tier + weapon) and balance state.
+// State is in-memory only — resets on extension restart.
 // ---------------------------------------------------------------------------
 
-let currentTier: TierName = 'Hey, Not Too Rough'
-let currentMode: SpendMode = 'interactive'
-
-const storage = new ExtensionStorageAdapter()
-let limiter: RateLimiter | null = null
-
-async function ensureLimiter(): Promise<RateLimiter> {
-  if (limiter) return limiter
-  const limits = resolveSpendLimits(currentTier, currentMode)
-  const state = await storage.load()
-  limiter = new RateLimiter(limits, state ?? undefined)
-  return limiter
+let config: AutospendConfig = {
+  tier: 'Hurt Me Plenty',
+  weapon: 'Shotgun',
 }
 
-async function persistLimiter(rl: RateLimiter): Promise<void> {
-  await storage.save(rl.getState())
+// Start with tier cap; will be clamped to wallet balance when we know it.
+let state: AutospendState = { balance: TIER_CAPS[config.tier] }
+
+export interface SpendCheckResult {
+  allowed: boolean
+  requiresConfirmation?: boolean
+  reason?: string
 }
 
-/** Check spend limits before a payment. Accepts either a Challenge or PaymentRequest. */
-export async function checkSpendLimits(request: SpendCheckable, origin: string): Promise<{ allowed: boolean; reason?: string }> {
-  const rl = await ensureLimiter()
-  const result: LimitCheckResult = rl.check(request, origin)
-
-  if (result.action === 'allow') return { allowed: true }
-  if (result.action === 'yellow-light') {
-    // TODO: open approve.html popup for user confirmation
-    return { allowed: false, reason: 'User approval required for this spend' }
-  }
-  if (result.action === 'block') {
-    if (result.severity === 'trip') {
-      rl.trip()
-      await persistLimiter(rl)
-    }
-    return { allowed: false, reason: result.reason }
-  }
-  return { allowed: true }
+/**
+ * Check whether a payment can be auto-approved.
+ * Returns `allowed: true` for auto-approve, or `requiresConfirmation: true`
+ * when the payment exceeds the weapon cap or current autospend balance.
+ */
+export function checkSpendLimits(request: PaymentRequest): SpendCheckResult {
+  const decision = checkPayment(request.amount, state, config)
+  if (decision === 'auto') return { allowed: true }
+  return { allowed: false, requiresConfirmation: true, reason: 'User confirmation required' }
 }
 
-/** Record a completed payment in the rate limiter. */
-export async function recordPayment(origin: string, satoshis: number, txid: string): Promise<void> {
-  const rl = await ensureLimiter()
-  rl.record({ timestamp: Date.now(), origin, satoshis, txid })
-  await persistLimiter(rl)
+/** Deduct a completed payment from the autospend balance. */
+export function recordPayment(amount: number): void {
+  state = recordPaymentFn(amount, state)
 }
 
-/** Change the spending tier. Resets the limiter to pick up new limits. */
-export function setTier(tier: TierName): void {
-  currentTier = tier
-  limiter = null
-  console.log(`x402: tier changed to "${currentTier}"`)
+/** Apply a pickup. Caller supplies the current wallet balance for the cap. */
+export function triggerPickup(pickup: PickupName, walletBalance: number): void {
+  state = applyPickupFn(pickup, state, config, walletBalance)
+  console.log(`x402: pickup "${pickup}" applied. Balance: ${state.balance}`)
 }
 
-/** Get current x402 state for UI, including resolved limits. */
+/** Change the difficulty tier. Clamps balance to the new cap. */
+export function setTier(tier: TierName, walletBalance: number): void {
+  config = { ...config, tier }
+  state = clampFn(state, config, walletBalance)
+  console.log(`x402: tier changed to "${tier}". Balance clamped to ${state.balance}`)
+}
+
+/** Change the weapon (per-tx max). */
+export function setWeapon(weapon: WeaponName): void {
+  config = { ...config, weapon }
+  console.log(`x402: weapon changed to "${weapon}"`)
+}
+
+/** Reset the autospend state to full for the current tier. */
+export function resetAutospend(walletBalance: number): void {
+  state = initialState(config, walletBalance)
+}
+
+/** Get current autospend state for UI. */
 export function getX402State(): {
   tier: TierName
-  mode: SpendMode
-  limits: { perTxMaxSatoshis: number; windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }> }
+  weapon: WeaponName
+  autospendBalance: number
+  tierCap: number
+  weaponCap: number
 } {
-  const resolved = resolveSpendLimits(currentTier, currentMode)
   return {
-    tier: currentTier,
-    mode: currentMode,
-    limits: {
-      perTxMaxSatoshis: resolved.perTxMaxSatoshis,
-      windows: resolved.windows.map(w => ({ window: w.window, maxSatoshis: w.maxSatoshis, maxTransactions: w.maxTransactions })),
-    },
+    tier: config.tier,
+    weapon: config.weapon,
+    autospendBalance: state.balance,
+    tierCap: TIER_CAPS[config.tier],
+    weaponCap: WEAPON_CAPS[config.weapon],
   }
 }
 
-/** Get spend status for the indicator. */
-export async function getSpendStatus(): Promise<{
-  spent: number
-  limit: number
-  window: string
+/** Get spend status for the indicator (balance as % of tier cap). */
+export function getSpendStatus(): {
+  balance: number
+  tierCap: number
   percentage: number
-  circuitBroken: boolean
-}> {
-  const rl = await ensureLimiter()
-  const state = rl.getState()
-  const limits = resolveSpendLimits(currentTier, currentMode)
-
-  // Use the first (shortest) window for the indicator
-  const firstWindow = limits.windows[0]
-  if (!firstWindow) {
-    return { spent: 0, limit: 0, window: 'none', percentage: 0, circuitBroken: state.circuitBroken }
-  }
-
-  const WINDOW_MS: Record<string, number> = {
-    minute: 60_000,
-    hour: 3_600_000,
-    day: 86_400_000,
-    week: 604_800_000,
-  }
-
-  const cutoff = Date.now() - (WINDOW_MS[firstWindow.window] ?? 86_400_000)
-  const spent = state.entries
-    .filter((e) => e.timestamp >= cutoff)
-    .reduce((sum, e) => sum + e.satoshis, 0)
-
+} {
+  const tierCap = TIER_CAPS[config.tier]
   return {
-    spent,
-    limit: firstWindow.maxSatoshis,
-    window: firstWindow.window,
-    percentage: firstWindow.maxSatoshis > 0 ? spent / firstWindow.maxSatoshis : 0,
-    circuitBroken: state.circuitBroken,
+    balance: state.balance,
+    tierCap,
+    percentage: tierCap > 0 ? state.balance / tierCap : 0,
   }
 }

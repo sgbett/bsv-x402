@@ -1,6 +1,6 @@
 /// <reference types="chrome" />
 
-import type { TierName } from "../../../src/types";
+import type { TierName, WeaponName, PickupName } from "../../../src/types";
 
 // ---------------------------------------------------------------------------
 // Popup state — composed from wallet + x402 controllers
@@ -12,12 +12,12 @@ interface PopupState {
   isUnlocked: boolean;
   network: string;
   balance?: number;
-  // x402 concerns
+  // Autospend concerns
   tier: TierName;
-  limits?: {
-    perTxMaxSatoshis: number;
-    windows: Array<{ window: string; maxSatoshis: number; maxTransactions: number }>;
-  };
+  weapon: WeaponName;
+  autospendBalance: number;
+  tierCap: number;
+  weaponCap: number;
 }
 
 const $ = <T extends HTMLElement>(id: string): T =>
@@ -99,21 +99,29 @@ function updateWalletPanel(state: PopupState): void {
 // ---------------------------------------------------------------------------
 
 function updateX402Panel(state: PopupState): void {
-  const currentTierEl = $<HTMLSpanElement>("current-tier");
-  const tierSelect = $<HTMLSelectElement>("tier-select");
-  const limitsEl = $<HTMLDivElement>("limits-summary");
+  const tierSelect = document.getElementById("tier-select") as HTMLSelectElement | null;
+  const weaponSelect = document.getElementById("weapon-select") as HTMLSelectElement | null;
+  const healthFill = document.getElementById("health-bar-fill") as HTMLDivElement | null;
+  const autospendValue = document.getElementById("autospend-value") as HTMLSpanElement | null;
+  const autospendCap = document.getElementById("autospend-cap") as HTMLSpanElement | null;
 
-  currentTierEl.textContent = state.tier;
-  tierSelect.value = state.tier;
+  if (tierSelect) tierSelect.value = state.tier;
+  if (weaponSelect) weaponSelect.value = state.weapon;
 
-  if (state.limits) {
-    const lines = state.limits.windows.map(
-      (w) => `${w.window}: ${w.maxSatoshis.toLocaleString()} sats / ${w.maxTransactions} txs`
-    );
-    lines.push(`Per-tx max: ${state.limits.perTxMaxSatoshis.toLocaleString()} sats`);
-    limitsEl.textContent = lines.join(" | ");
-  } else {
-    limitsEl.textContent = "No active limits";
+  // Health bar: percentage of tier cap
+  if (healthFill && state.tierCap > 0) {
+    const pct = Math.max(0, Math.min(100, (state.autospendBalance / state.tierCap) * 100));
+    healthFill.style.width = `${pct}%`;
+    healthFill.classList.remove("low", "critical");
+    if (pct < 25) healthFill.classList.add("critical");
+    else if (pct < 50) healthFill.classList.add("low");
+  }
+
+  if (autospendValue) {
+    autospendValue.textContent = `${state.autospendBalance.toLocaleString()} sats`;
+  }
+  if (autospendCap) {
+    autospendCap.textContent = `/ ${state.tierCap.toLocaleString()} sats`;
   }
 }
 
@@ -196,7 +204,11 @@ document.addEventListener("DOMContentLoaded", async () => {
       isSetUp: false,
       isUnlocked: false,
       network: "mainnet",
-      tier: "Hey, Not Too Rough",
+      tier: "Hurt Me Plenty",
+      weapon: "Shotgun",
+      autospendBalance: 0,
+      tierCap: 100_000_000,
+      weaponCap: 1_000_000,
     });
   }
 
@@ -284,6 +296,31 @@ document.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       alert(`Tier change failed: ${err instanceof Error ? err.message : String(err)}`);
     }
+  });
+
+  // x402: Weapon change
+  $<HTMLSelectElement>("weapon-select").addEventListener("change", async (e) => {
+    const weapon = (e.target as HTMLSelectElement).value as WeaponName;
+    try {
+      const state = await sendMessage({ type: "setWeapon", payload: { weapon } });
+      updateUI(state);
+    } catch (err) {
+      alert(`Weapon change failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
+  // x402: Pickup buttons
+  document.querySelectorAll<HTMLButtonElement>(".pickup-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const pickup = btn.dataset.pickup as PickupName | undefined;
+      if (!pickup) return;
+      try {
+        const state = await sendMessage({ type: "pickup", payload: { pickup } });
+        updateUI(state);
+      } catch (err) {
+        alert(`Pickup failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    });
   });
 
   // Wallet: Set up (guarded — wallet panel may not exist)

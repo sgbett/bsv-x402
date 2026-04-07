@@ -5,6 +5,18 @@ import { handleCWIRequest } from './cwi-proxy'
 import { BuiltInWalletBackend } from './builtin-wallet-backend'
 import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
+import { resolveApproval, handleWindowClosed } from './pending-approvals'
+
+// Helper: fetch current wallet balance (for autospend tier clamping)
+async function getWalletBalance(): Promise<number> {
+  try {
+    const state = await wallet.getWalletState()
+    const balance = Number(state.balance)
+    return Number.isFinite(balance) && balance >= 0 ? balance : 0
+  } catch {
+    return 0
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Pubkey → P2PKH address (for popup display)
@@ -147,7 +159,21 @@ async function fetchUtxos(address: string): Promise<Array<{ tx_hash: string; tx_
 // ---------------------------------------------------------------------------
 
 interface InternalMessage {
-  type: 'unlock' | 'lock' | 'setup' | 'getState' | 'getAddress' | 'setNetwork' | 'setTier' | 'switchBackend' | 'getSpendStatus' | 'openPopupTab'
+  type:
+    | 'unlock'
+    | 'lock'
+    | 'setup'
+    | 'getState'
+    | 'getAddress'
+    | 'setNetwork'
+    | 'setTier'
+    | 'setWeapon'
+    | 'pickup'
+    | 'resetAutospend'
+    | 'switchBackend'
+    | 'getSpendStatus'
+    | 'openPopupTab'
+    | 'approvalResponse'
   payload?: unknown
 }
 
@@ -183,7 +209,7 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       const payload = message.payload as { seed: string; password: string; tier?: import('../../src/types').TierName } | undefined
       if (!payload?.password || !payload?.seed) throw new Error('Seed and password required')
       await wallet.setup(payload.seed, payload.password)
-      if (payload.tier) x402.setTier(payload.tier)
+      if (payload.tier) x402.setTier(payload.tier, await getWalletBalance())
       break
     }
     case 'setNetwork': {
@@ -195,9 +221,22 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
     // x402 concerns
     case 'setTier': {
       const payload = message.payload as { tier: import('../../src/types').TierName } | undefined
-      if (payload?.tier) x402.setTier(payload.tier)
+      if (payload?.tier) x402.setTier(payload.tier, await getWalletBalance())
       break
     }
+    case 'setWeapon': {
+      const payload = message.payload as { weapon: import('../../src/types').WeaponName } | undefined
+      if (payload?.weapon) x402.setWeapon(payload.weapon)
+      break
+    }
+    case 'pickup': {
+      const payload = message.payload as { pickup: import('../../src/types').PickupName } | undefined
+      if (payload?.pickup) x402.triggerPickup(payload.pickup, await getWalletBalance())
+      break
+    }
+    case 'resetAutospend':
+      x402.resetAutospend(await getWalletBalance())
+      break
 
     case 'getState':
       break // just return composed state below
@@ -271,9 +310,26 @@ chrome.runtime.onMessage.addListener(
 
     // Spend status — allowed from content scripts (for the indicator)
     if (isInternalMessage(message) && message.type === 'getSpendStatus') {
-      x402.getSpendStatus()
-        .then((status) => sendResponse(status))
-        .catch(() => sendResponse(null))
+      sendResponse(x402.getSpendStatus())
+      return true
+    }
+
+    // Approval response — only accepted from our own approve.html popup.
+    // The id is a capability-bearing UUID, but we still validate the sender
+    // URL to prevent any other extension page (or future content-script
+    // relay) from resolving approvals.
+    if (isInternalMessage(message) && message.type === 'approvalResponse') {
+      const isFromApprovePopup = sender.id === chrome.runtime.id
+        && sender.url?.startsWith(chrome.runtime.getURL('ui/x402/approve.html'))
+      if (!isFromApprovePopup) {
+        sendResponse({ ok: false, error: 'Unauthorised sender' })
+        return true
+      }
+      const payload = message.payload as { id?: string; approved?: boolean } | undefined
+      if (payload?.id && typeof payload.approved === 'boolean') {
+        resolveApproval(payload.id, payload.approved)
+      }
+      sendResponse({ ok: true })
       return true
     }
 
@@ -360,4 +416,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     wallet.lock()
     console.log('x402: wallet auto-locked after idle timeout')
   }
+})
+
+// ---------------------------------------------------------------------------
+// Treat closing the approval popup as a deny
+// ---------------------------------------------------------------------------
+
+chrome.windows.onRemoved.addListener((windowId) => {
+  handleWindowClosed(windowId)
 })

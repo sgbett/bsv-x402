@@ -54,44 +54,7 @@ export interface PaymentRequest {
   protocol: PaymentProtocol
 }
 
-// === Spending limits ===
-
-export type SpendMode = "interactive" | "programmatic"
-export type TimeWindow = "minute" | "hour" | "day" | "week"
-
-export interface WindowLimit {
-  window: TimeWindow
-  maxSatoshis: number
-  maxTransactions: number
-}
-
-export interface SpendLimits {
-  windows: WindowLimit[]
-  perTxMaxSatoshis: number
-  yellowLightThreshold: number // 0-1, default 0.8
-  requirePerSitePrompt: boolean
-  sitePolicies: Record<string, SitePolicy>
-  require2fa: TwoFactorPolicy
-}
-
-export type SitePolicyAction = "global" | "custom" | "block"
-
-export interface SitePolicy {
-  origin: string
-  action: SitePolicyAction
-  limits?: WindowLimit[]
-  perTxMaxSatoshis?: number
-}
-
-export interface TwoFactorPolicy {
-  onCircuitBreakerReset: boolean
-  onTierChange: boolean
-  onHighValueTx: boolean
-  highValueThreshold: number // sats — txs above this require 2FA
-  onNewSiteApproval: boolean
-}
-
-// === Tier presets (Doom II difficulty) ===
+// === Autospend model ===
 
 export type TierName =
   | "I'm Too Young to Die"
@@ -100,9 +63,26 @@ export type TierName =
   | "Ultra-Violence"
   | "Nightmare!"
 
-export interface TierPreset {
-  interactive: SpendLimits
-  programmatic: SpendLimits
+export type WeaponName =
+  | "Fists"
+  | "Chainsaw"
+  | "Pistol"
+  | "Shotgun"
+  | "Super Shotgun"
+  | "Chaingun"
+  | "Rocket Launcher"
+  | "Plasma Rifle"
+  | "BFG9000"
+
+export type PickupName = "Medkit" | "Stimpak" | "Soul Sphere" | "New Game"
+
+export interface AutospendConfig {
+  tier: TierName
+  weapon: WeaponName
+}
+
+export interface AutospendState {
+  balance: number
 }
 
 // === Factory config ===
@@ -112,46 +92,6 @@ export interface X402Config {
   brc105ProofConstructor?: Brc105ProofConstructor
   brc105Wallet?: Brc105Wallet
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
-}
-
-// === Rate limiter ===
-
-export interface YellowLightEvent {
-  origin: string
-  currentSpend: number
-  limit: number
-  window: TimeWindow
-  challenge: Challenge | PaymentRequest
-}
-
-export interface LedgerEntry {
-  timestamp: number
-  origin: string
-  satoshis: number
-  txid: string
-  protocol?: PaymentProtocol
-}
-
-export interface LimitState {
-  entries: LedgerEntry[]
-  circuitBroken: boolean
-  hmac: string
-}
-
-export type BlockSeverity = "reject" | "window" | "trip"
-
-export type LimitCheckResult =
-  | { action: "allow" }
-  | { action: "yellow-light"; detail: YellowLightEvent }
-  | { action: "block"; reason: string; severity: BlockSeverity }
-
-// === Storage ===
-
-export interface StorageAdapter {
-  load(): Promise<LimitState | null>
-  save(state: LimitState): Promise<void>
-  loadSitePolicies(): Promise<Record<string, SitePolicy>>
-  saveSitePolicies(policies: Record<string, SitePolicy>): Promise<void>
 }
 
 // === BRC-100 CWI interface types ===
@@ -237,15 +177,3 @@ export interface CWIInterface {
   getVersion(params?: object): Promise<{ version: string }>
 }
 
-// === 2FA ===
-
-export type TwoFactorAction =
-  | { type: "circuit-breaker-reset" }
-  | { type: "tier-change"; from: TierName; to: TierName }
-  | { type: "high-value-tx"; amount: number; origin: string }
-  | { type: "new-site-approval"; origin: string }
-  | { type: "limit-override"; amount: number; origin: string; reason: string }
-
-export interface TwoFactorProvider {
-  verify(action: TwoFactorAction): Promise<boolean>
-}
