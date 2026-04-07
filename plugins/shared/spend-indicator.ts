@@ -3,17 +3,18 @@
 // ---------------------------------------------------------------------------
 // Spend indicator — injected into page DOM by content script
 //
-// Shows x402 spend progress against the active window limit.
-// Three display modes: bar (top strip), badge (corner), hidden.
-// Uses Shadow DOM for style isolation.
+// Shows the autospend health bar — remaining balance as a percentage
+// of the tier cap. Three display modes: bar (top strip), badge (corner),
+// hidden. Uses Shadow DOM for style isolation.
 // ---------------------------------------------------------------------------
 
 export interface SpendStatus {
-  spent: number
-  limit: number
-  window: string
+  /** Current autospend balance (sats remaining for auto-approval). */
+  balance: number
+  /** Maximum autospend balance for the active tier. */
+  tierCap: number
+  /** balance / tierCap, in [0, 1]. */
   percentage: number
-  circuitBroken: boolean
 }
 
 export type IndicatorMode = 'bar' | 'badge' | 'hidden'
@@ -54,26 +55,23 @@ export class SpendIndicator {
     const label = this.shadow.querySelector<HTMLElement>('.x402-label')
     if (!fill || !label) return
 
-    const pct = Math.min(status.percentage * 100, 100)
+    // Health bar: percentage of tier cap remaining
+    const pct = Math.max(0, Math.min(status.percentage * 100, 100))
     fill.style.width = `${pct}%`
 
-    // Colour: green → yellow → red
-    if (status.circuitBroken) {
+    // Colour: green (healthy) → yellow → red (low)
+    if (pct < 25) {
       fill.style.backgroundColor = '#dc3545'
-    } else if (status.percentage >= 0.8) {
+    } else if (pct < 50) {
       fill.style.backgroundColor = '#ffc107'
     } else {
       fill.style.backgroundColor = '#28a745'
     }
 
-    const spentStr = status.spent.toLocaleString()
-    const limitStr = status.limit.toLocaleString()
-    label.textContent = `${spentStr}/${limitStr} sats`
-    label.title = `${spentStr} of ${limitStr} sats spent this ${status.window}`
-
-    if (status.circuitBroken) {
-      label.title = 'Circuit breaker tripped — payments blocked'
-    }
+    const balanceStr = status.balance.toLocaleString()
+    const capStr = status.tierCap.toLocaleString()
+    label.textContent = `${balanceStr}/${capStr} sats`
+    label.title = `Autospend: ${balanceStr} of ${capStr} sats remaining`
   }
 
   unmount(): void {

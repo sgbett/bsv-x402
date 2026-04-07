@@ -59,6 +59,14 @@ describe("checkPayment", () => {
     expect(checkPayment(100_000_000, state, config)).toBe("auto")
     expect(checkPayment(100_000_001, state, config)).toBe("confirm")
   })
+
+  it("rejects invalid amounts (NaN, Infinity, negative, zero)", () => {
+    const state: AutospendState = { balance: 1_000_000 }
+    expect(checkPayment(NaN, state, HMP)).toBe("confirm")
+    expect(checkPayment(Infinity, state, HMP)).toBe("confirm")
+    expect(checkPayment(-100, state, HMP)).toBe("confirm")
+    expect(checkPayment(0, state, HMP)).toBe("confirm")
+  })
 })
 
 describe("recordPayment", () => {
@@ -76,6 +84,14 @@ describe("recordPayment", () => {
     const state: AutospendState = { balance: 1_000_000 }
     recordPayment(250_000, state)
     expect(state.balance).toBe(1_000_000)
+  })
+
+  it("ignores invalid amounts (does not increase balance on negative)", () => {
+    const state: AutospendState = { balance: 1_000_000 }
+    expect(recordPayment(-500, state)).toEqual({ balance: 1_000_000 })
+    expect(recordPayment(NaN, state)).toEqual({ balance: 1_000_000 })
+    expect(recordPayment(Infinity, state)).toEqual({ balance: 1_000_000 })
+    expect(recordPayment(0, state)).toEqual({ balance: 1_000_000 })
   })
 })
 

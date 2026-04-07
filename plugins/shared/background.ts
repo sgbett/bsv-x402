@@ -11,7 +11,8 @@ import { resolveApproval, handleWindowClosed } from './pending-approvals'
 async function getWalletBalance(): Promise<number> {
   try {
     const state = await wallet.getWalletState()
-    return (state.balance as number) ?? 0
+    const balance = Number(state.balance)
+    return Number.isFinite(balance) && balance >= 0 ? balance : 0
   } catch {
     return 0
   }

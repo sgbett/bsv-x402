@@ -50,11 +50,17 @@ export type PaymentDecision = "auto" | "confirm"
  * Check whether a payment can be auto-approved.
  * Auto-approve if `amount <= min(weapon cap, autospend balance)`.
  */
+function isValidAmount(amount: number): boolean {
+  return Number.isFinite(amount) && amount > 0
+}
+
 export function checkPayment(
   amount: number,
   state: AutospendState,
   config: AutospendConfig,
 ): PaymentDecision {
+  // Invalid amounts (NaN, Infinity, negative, zero) always require confirmation
+  if (!isValidAmount(amount)) return "confirm"
   const perTxMax = WEAPON_CAPS[config.weapon]
   const effectiveMax = Math.min(perTxMax, state.balance)
   return amount <= effectiveMax ? "auto" : "confirm"
@@ -62,12 +68,13 @@ export function checkPayment(
 
 /**
  * Deduct a payment from the autospend balance.
- * Balance can never go below zero.
+ * Balance can never go below zero. Invalid amounts are ignored.
  */
 export function recordPayment(
   amount: number,
   state: AutospendState,
 ): AutospendState {
+  if (!isValidAmount(amount)) return state
   return { balance: Math.max(0, state.balance - amount) }
 }
 

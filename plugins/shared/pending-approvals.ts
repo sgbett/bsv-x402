@@ -18,9 +18,13 @@ interface PendingApproval {
   origin: string
   resolve: (approved: boolean) => void
   windowId?: number
+  timeoutId?: ReturnType<typeof setTimeout>
 }
 
 const pending = new Map<string, PendingApproval>()
+
+/** Auto-deny approvals that don't get a response within this window. */
+const APPROVAL_TIMEOUT_MS = 65_000 // slightly longer than the UI's 60s countdown
 
 export interface ApprovalRequest {
   amount: number
@@ -29,34 +33,58 @@ export interface ApprovalRequest {
 
 /**
  * Request user approval for a payment. Opens a popup window and waits
- * for the user to click Approve or Deny.
+ * for the user to click Approve or Deny. Auto-denies on timeout or
+ * window creation failure.
  */
 export function requestApproval(req: ApprovalRequest): Promise<boolean> {
   return new Promise((resolve) => {
     const id = crypto.randomUUID()
+
+    const settle = (approved: boolean) => {
+      const approval = pending.get(id)
+      if (!approval) return
+      pending.delete(id)
+      if (approval.timeoutId) clearTimeout(approval.timeoutId)
+      resolve(approved)
+    }
+
     const approval: PendingApproval = {
       id,
       amount: req.amount,
       origin: req.origin,
-      resolve,
+      resolve: settle,
     }
     pending.set(id, approval)
+
+    // Auto-deny if no response within the timeout
+    approval.timeoutId = setTimeout(() => {
+      console.warn(`x402: approval ${id} timed out — auto-denying`)
+      settle(false)
+    }, APPROVAL_TIMEOUT_MS)
 
     // Open approve.html in a popup window
     const url = chrome.runtime.getURL(
       `ui/x402/approve.html?id=${encodeURIComponent(id)}&amount=${req.amount}&origin=${encodeURIComponent(req.origin)}`,
     )
 
-    chrome.windows.create({
-      url,
-      type: 'popup',
-      width: 400,
-      height: 320,
-    }, (window) => {
-      if (window?.id !== undefined) {
+    try {
+      chrome.windows.create({
+        url,
+        type: 'popup',
+        width: 400,
+        height: 320,
+      }, (window) => {
+        if (chrome.runtime.lastError || !window?.id) {
+          console.warn('x402: failed to open approval popup, auto-denying:', chrome.runtime.lastError?.message)
+          settle(false)
+          return
+        }
         approval.windowId = window.id
-      }
-    })
+      })
+    } catch (err) {
+      console.warn('x402: chrome.windows.create threw, auto-denying:', err)
+      settle(false)
+    }
   })
 }
 
@@ -65,12 +93,12 @@ export function resolveApproval(id: string, approved: boolean): boolean {
   const approval = pending.get(id)
   if (!approval) return false
 
-  pending.delete(id)
+  // Close the popup window before settling so window-removed events
+  // don't double-resolve
+  const windowId = approval.windowId
   approval.resolve(approved)
-
-  // Close the popup window
-  if (approval.windowId !== undefined) {
-    chrome.windows.remove(approval.windowId).catch(() => {
+  if (windowId !== undefined) {
+    chrome.windows.remove(windowId).catch(() => {
       // Ignore — window may already be closed
     })
   }
@@ -88,7 +116,6 @@ export function getPendingApproval(id: string): { amount: number; origin: string
 export function handleWindowClosed(windowId: number): void {
   for (const approval of pending.values()) {
     if (approval.windowId === windowId) {
-      pending.delete(approval.id)
       approval.resolve(false)
       return
     }
