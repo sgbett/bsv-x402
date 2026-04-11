@@ -14,7 +14,7 @@
 const params = new URLSearchParams(window.location.search);
 const requestId = params.get('id');
 const amount = parseInt(params.get('amount') ?? '0', 10);
-const origin = params.get('origin') ?? 'unknown origin';
+const requestOrigin = params.get('origin') ?? 'unknown origin';
 
 // DOM elements
 const originDisplay = document.getElementById('origin-display') as HTMLElement;
@@ -31,7 +31,7 @@ const denyBtn = document.getElementById('deny-btn') as HTMLButtonElement;
 // Populate UI from query params
 // ---------------------------------------------------------------------------
 
-originDisplay.textContent = origin;
+originDisplay.textContent = requestOrigin;
 amountValue.textContent = amount.toLocaleString();
 descriptionEl.textContent = 'This payment exceeds your autospend limit.';
 usdEstimate.style.display = 'none';
