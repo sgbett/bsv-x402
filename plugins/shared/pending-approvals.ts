@@ -72,7 +72,7 @@ export function requestApproval(req: ApprovalRequest): Promise<boolean> {
         url,
         type: 'popup',
         width: 400,
-        height: 320,
+        height: 500,
       }, (window) => {
         if (chrome.runtime.lastError || !window?.id) {
           console.warn('x402: failed to open approval popup, auto-denying:', chrome.runtime.lastError?.message)

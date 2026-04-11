@@ -4,3 +4,4 @@ dist/plugins/
 .mcp.json
 tmp/
 docs/
+plugins/safari/xcode/project/
