@@ -10,6 +10,26 @@ import {
 import { SpendIndicator, type SpendStatus, type IndicatorMode } from './spend-indicator';
 
 // ---------------------------------------------------------------------------
+// Firefox Xray compatibility
+//
+// In Firefox, objects created in the content script's compartment are not
+// directly accessible to page scripts — reading a property raises
+// "Permission denied to access property". To expose an object via
+// CustomEvent.detail, we must clone it into the page's compartment using
+// the Firefox-only global `cloneInto`. On Chrome/Safari, `cloneInto` is
+// undefined and objects cross the content/page boundary freely, so we pass
+// the detail through as-is.
+// ---------------------------------------------------------------------------
+
+declare const cloneInto: (<T>(obj: T, targetScope: unknown) => T) | undefined;
+
+function dispatchToPage(eventName: string, detail: unknown): void {
+  const payload =
+    typeof cloneInto === 'function' ? cloneInto(detail, window) : detail;
+  document.dispatchEvent(new CustomEvent(eventName, { detail: payload }));
+}
+
+// ---------------------------------------------------------------------------
 // 1. Inject the page script into the page context (runs at document_start)
 // ---------------------------------------------------------------------------
 
@@ -55,15 +75,11 @@ document.addEventListener(CWI_REQUEST_EVENT, (evt: Event) => {
           status: 'error',
           error: chrome.runtime.lastError?.message ?? 'No response from background',
         };
-        document.dispatchEvent(
-          new CustomEvent(CWI_RESPONSE_EVENT, { detail: errorResponse }),
-        );
+        dispatchToPage(CWI_RESPONSE_EVENT, errorResponse);
         return;
       }
 
-      document.dispatchEvent(
-        new CustomEvent(CWI_RESPONSE_EVENT, { detail: response }),
-      );
+      dispatchToPage(CWI_RESPONSE_EVENT, response);
     });
   } catch {
     const errorResponse: CWIResponse = {
@@ -71,9 +87,7 @@ document.addEventListener(CWI_REQUEST_EVENT, (evt: Event) => {
       status: 'error',
       error: 'Extension context invalidated',
     };
-    document.dispatchEvent(
-      new CustomEvent(CWI_RESPONSE_EVENT, { detail: errorResponse }),
-    );
+    dispatchToPage(CWI_RESPONSE_EVENT, errorResponse);
   }
 });
 

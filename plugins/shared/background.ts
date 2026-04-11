@@ -196,6 +196,8 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       const payload = message.payload as { password: string } | undefined
       if (!payload?.password) throw new Error('Password required')
       await wallet.unlock(payload.password)
+      // Clamp autospend balance to actual wallet balance
+      x402.clampToWallet(await getWalletBalance())
       // Scan for legacy P2PKH UTXOs in the background (don't block unlock)
       scanAndImportUtxos().catch((err) => {
         console.warn('x402: UTXO scan failed (non-blocking):', err)
@@ -247,7 +249,7 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       const result = await backend.call('getPublicKey', { identityKey: true }, 'self') as { publicKey: string }
       const address = await pubkeyToAddress(result.publicKey)
       const walletState = await wallet.getWalletState()
-      const x402State = x402.getX402State()
+      const x402State = x402.getX402State(await getWalletBalance())
       return { ...walletState, ...x402State, identityKey: result.publicKey, address }
     }
 
@@ -264,7 +266,10 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
 
   // All internal messages return composed state from both controllers
   const walletState = await wallet.getWalletState()
-  const x402State = x402.getX402State()
+  const walletBal = wallet.isUnlocked() && walletState.balance !== undefined
+    ? Number(walletState.balance) || 0
+    : undefined
+  const x402State = x402.getX402State(walletBal)
   return { ...walletState, ...x402State }
 }
 
@@ -310,7 +315,8 @@ chrome.runtime.onMessage.addListener(
 
     // Spend status — allowed from content scripts (for the indicator)
     if (isInternalMessage(message) && message.type === 'getSpendStatus') {
-      sendResponse(x402.getSpendStatus())
+      const bal = wallet.isUnlocked() ? getWalletBalance() : Promise.resolve(undefined)
+      bal.then((wb) => sendResponse(x402.getSpendStatus(wb))).catch(() => sendResponse(x402.getSpendStatus(0)))
       return true
     }
 
