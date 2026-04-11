@@ -79,30 +79,39 @@ export function resetAutospend(walletBalance: number): void {
   state = initialState(config, walletBalance)
 }
 
+/** Clamp the autospend balance to the wallet balance (e.g. after unlock). */
+export function clampToWallet(walletBalance: number): void {
+  state = clampFn(state, config, walletBalance)
+}
+
 /** Get current autospend state for UI. */
-export function getX402State(): {
+export function getX402State(walletBalance?: number): {
   tier: TierName
   weapon: WeaponName
   autospendBalance: number
   tierCap: number
   weaponCap: number
 } {
+  const rawTierCap = TIER_CAPS[config.tier]
+  // Effective cap: never exceed wallet balance when known
+  const tierCap = walletBalance !== undefined ? Math.min(rawTierCap, walletBalance) : rawTierCap
   return {
     tier: config.tier,
     weapon: config.weapon,
     autospendBalance: state.balance,
-    tierCap: TIER_CAPS[config.tier],
+    tierCap,
     weaponCap: WEAPON_CAPS[config.weapon],
   }
 }
 
 /** Get spend status for the indicator (balance as % of tier cap). */
-export function getSpendStatus(): {
+export function getSpendStatus(walletBalance?: number): {
   balance: number
   tierCap: number
   percentage: number
 } {
-  const tierCap = TIER_CAPS[config.tier]
+  const rawTierCap = TIER_CAPS[config.tier]
+  const tierCap = walletBalance !== undefined ? Math.min(rawTierCap, walletBalance) : rawTierCap
   return {
     balance: state.balance,
     tierCap,

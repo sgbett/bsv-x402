@@ -193,6 +193,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   function updateUI(state: PopupState): void {
     updateWalletPanel(state);
     updateX402Panel(state);
+
+    // Hide x402 panel when wallet is locked — autospend is meaningless without a wallet
+    const x402Panel = document.getElementById("x402-panel");
+    if (x402Panel) x402Panel.hidden = !state.isUnlocked;
   }
 
   try {
