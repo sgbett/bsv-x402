@@ -10,6 +10,26 @@ import type {
 
 // === Proof construction via BRC-100 wallet (window.CWI) ===
 
+// Base64/hex helpers (inlined to avoid cross-module dependency on brc105-proof)
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ""
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary)
+}
+
+function numberArrayToBase64(arr: number[]): string {
+  return bytesToBase64(new Uint8Array(arr))
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) throw new Error("Hex string must have even length")
+  const bytes = new Uint8Array(hex.length / 2)
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
+  }
+  return bytes
+}
+
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 function base58DecodeCheck(address: string): { version: number; payload: Uint8Array } {
@@ -95,13 +115,20 @@ async function defaultConstructProof(challenge: Challenge): Promise<Proof> {
     throw new Error("Wallet declined payment or returned invalid result")
   }
 
-  if (!result.rawTx || typeof result.rawTx !== "string" || result.rawTx.length === 0) {
-    throw new Error("Wallet did not return raw transaction")
+  // Convert transaction to base64 BEEF
+  // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
+  let beef: string
+  if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
+    beef = numberArrayToBase64(result.tx)
+  } else if (result.rawTx && typeof result.rawTx === "string" && result.rawTx.length > 0) {
+    beef = bytesToBase64(hexToBytes(result.rawTx))
+  } else {
+    throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
   }
 
   return {
     txid: result.txid,
-    rawTx: result.rawTx,
+    beef,
   }
 }
 

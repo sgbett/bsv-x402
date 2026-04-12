@@ -9,7 +9,7 @@ export interface Challenge {
 
 export interface Proof {
   txid: string
-  rawTx: string
+  beef: string  // base64-encoded AtomicBEEF
 }
 
 // === BRC-105 payment protocol ===
