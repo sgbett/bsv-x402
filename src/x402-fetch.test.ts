@@ -51,17 +51,22 @@ describe("createX402Fetch", () => {
       .mockResolvedValueOnce(make402Response(1000))
       .mockResolvedValueOnce(make200Response())
 
-    const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock-txid", rawTx: "00" })
+    const proofConstructor = vi.fn().mockResolvedValue({ txid: "mock-txid", beef: btoa("mock-tx") })
     const f = createX402Fetch({ proofConstructor })
 
     const res = await f("https://api.example.com/data")
     expect(res.status).toBe(200)
     expect(proofConstructor).toHaveBeenCalledOnce()
 
-    // Verify the retry request has X402-Proof header
+    // Verify the retry request has X402-Proof header with beef field
     const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
     const retryHeaders = retryCall[1]?.headers as Headers
-    expect(retryHeaders.get("X402-Proof")).toBeTruthy()
+    const proofHeader = retryHeaders.get("X402-Proof")
+    expect(proofHeader).toBeTruthy()
+    const proof = JSON.parse(proofHeader!)
+    expect(proof).toHaveProperty("txid", "mock-txid")
+    expect(proof).toHaveProperty("beef", btoa("mock-tx"))
+    expect(proof).not.toHaveProperty("rawTx")
   })
 
   it("returns original 402 when proof construction fails", async () => {
@@ -127,6 +132,141 @@ describe("payeeAddressToLockingScript", () => {
   it("rejects unsupported version byte", () => {
     expect(() => payeeAddressToLockingScript("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"))
       .toThrow("Unsupported address version")
+  })
+})
+
+// === defaultConstructProof tests (via CWI mock) ===
+
+function make402WithValidAddress(amount: number = 1000) {
+  return new Response("Payment Required", {
+    status: 402,
+    headers: {
+      "X402-Challenge": JSON.stringify({
+        nonce: "test-nonce",
+        payee: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+        amount,
+        network: "mainnet",
+      }),
+    },
+  })
+}
+
+describe("defaultConstructProof (via CWI)", () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalCWI: any
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalCWI = (globalThis as any).CWI
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    ;(globalThis as any).CWI = originalCWI
+  })
+
+  it("converts tx (number[]) to base64 beef (modern wallet)", async () => {
+    const txBytes = [0xca, 0xfe]
+    ;(globalThis as any).CWI = {
+      createAction: vi.fn().mockResolvedValue({ txid: "abc123", tx: txBytes }),
+    }
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make402WithValidAddress())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch()
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const proof = JSON.parse(retryHeaders.get("X402-Proof")!)
+    expect(proof.txid).toBe("abc123")
+    // base64 of [0xca, 0xfe]
+    const expectedBase64 = btoa(String.fromCharCode(0xca, 0xfe))
+    expect(proof.beef).toBe(expectedBase64)
+    expect(proof).not.toHaveProperty("rawTx")
+  })
+
+  it("converts rawTx hex to base64 beef (legacy wallet)", async () => {
+    ;(globalThis as any).CWI = {
+      createAction: vi.fn().mockResolvedValue({ txid: "abc123", rawTx: "deadbeef" }),
+    }
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make402WithValidAddress())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch()
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const proof = JSON.parse(retryHeaders.get("X402-Proof")!)
+    expect(proof.txid).toBe("abc123")
+    // base64 of [0xde, 0xad, 0xbe, 0xef]
+    const expectedBase64 = btoa(String.fromCharCode(0xde, 0xad, 0xbe, 0xef))
+    expect(proof.beef).toBe(expectedBase64)
+  })
+
+  it("prefers tx over rawTx when both present", async () => {
+    const txBytes = [0xca]
+    ;(globalThis as any).CWI = {
+      createAction: vi.fn().mockResolvedValue({ txid: "abc123", tx: txBytes, rawTx: "dead" }),
+    }
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make402WithValidAddress())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch()
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const proof = JSON.parse(retryHeaders.get("X402-Proof")!)
+    // Should use tx, not rawTx
+    const expectedBase64 = btoa(String.fromCharCode(0xca))
+    expect(proof.beef).toBe(expectedBase64)
+  })
+
+  it("throws when neither tx nor rawTx present", async () => {
+    ;(globalThis as any).CWI = {
+      createAction: vi.fn().mockResolvedValue({ txid: "abc123" }),
+    }
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make402WithValidAddress())
+
+    const onProofError = vi.fn()
+    const f = createX402Fetch({ onProofError })
+    const res = await f("https://api.example.com/data")
+
+    // Should fall back to returning the original 402
+    expect(res.status).toBe(402)
+    expect(onProofError).toHaveBeenCalledOnce()
+    expect(onProofError.mock.calls[0][0]).toBeInstanceOf(Error)
+    expect((onProofError.mock.calls[0][0] as Error).message).toMatch(/no transaction data/i)
+  })
+
+  it("throws when tx is empty array and rawTx absent", async () => {
+    ;(globalThis as any).CWI = {
+      createAction: vi.fn().mockResolvedValue({ txid: "abc123", tx: [] }),
+    }
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make402WithValidAddress())
+
+    const onProofError = vi.fn()
+    const f = createX402Fetch({ onProofError })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(402)
+    expect(onProofError).toHaveBeenCalledOnce()
+    expect((onProofError.mock.calls[0][0] as Error).message).toMatch(/no transaction data/i)
   })
 })
 
@@ -221,7 +361,7 @@ describe("createX402Fetch — BRC-105", () => {
       .mockResolvedValueOnce(bothHeaders)
       .mockResolvedValueOnce(make200Response())
 
-    const customProof = vi.fn().mockResolvedValue({ txid: "custom-txid", rawTx: "00" })
+    const customProof = vi.fn().mockResolvedValue({ txid: "custom-txid", beef: btoa("mock-tx") })
     const brc105Proof = mockBrc105ProofConstructor()
 
     const f = createX402Fetch({
