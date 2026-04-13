@@ -240,14 +240,25 @@ describe("constructBrc105Proof", () => {
     expect(params.options.returnTXIDOnly).toBe(false)
   })
 
-  it("returns abort callback when wallet has abortAction", async () => {
-    const wallet = mockWallet({
-      abortAction: vi.fn().mockResolvedValue({ aborted: true }),
-    })
+  it("returns abort callback that calls wallet.abortAction with txid", async () => {
+    const abortAction = vi.fn().mockResolvedValue({ aborted: true })
+    const wallet = mockWallet({ abortAction })
     const { proof, abort } = await constructBrc105Proof(CHALLENGE, wallet)
 
-    expect(proof).toBeDefined()
     expect(abort).toBeDefined()
+    await abort!()
+    expect(abortAction).toHaveBeenCalledOnce()
+    expect(abortAction).toHaveBeenCalledWith({ reference: proof.txid })
+  })
+
+  it("abort callback swallows errors from wallet.abortAction", async () => {
+    const abortAction = vi.fn().mockRejectedValue(new Error("abort failed"))
+    const wallet = mockWallet({ abortAction })
+    const { abort } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(abort).toBeDefined()
+    // Should not throw
+    await expect(abort!()).resolves.toBeUndefined()
   })
 
   it("returns undefined abort when wallet lacks abortAction", async () => {

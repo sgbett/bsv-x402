@@ -211,7 +211,18 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       const headers = new Headers(init?.headers)
       headers.set("x-bsv-payment", JSON.stringify(proof))
       headers.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
-      const retryResponse = await fetch(input, { ...init, headers })
+
+      let retryResponse: Response
+      try {
+        retryResponse = await fetch(input, { ...init, headers })
+      } catch (err) {
+        // Network error, timeout, etc. — abort to release locked UTXOs
+        if (abort) {
+          await abort()
+          console.warn('[x402] BRC-105 retry fetch failed, UTXOs released via abortAction')
+        }
+        throw err
+      }
 
       if (!retryResponse.ok && abort) {
         await abort()

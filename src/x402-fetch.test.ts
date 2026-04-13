@@ -496,4 +496,26 @@ describe("createX402Fetch — BRC-105", () => {
 
     expect(res.status).toBe(500)
   })
+
+  it("calls abort when retry fetch throws (network error)", async () => {
+    const abort = vi.fn()
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Failed to fetch")
+    expect(abort).toHaveBeenCalledOnce()
+  })
 })
