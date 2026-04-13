@@ -34,7 +34,7 @@
     "url": "git+https://github.com/sgbett/bsv-x402.git"
   },
   "devDependencies": {
-    "@bsv/wallet-toolbox-client": "^2.1.17",
+    "@bsv/wallet-toolbox-client": "npm:@sgbett/wallet-toolbox-client@2.1.19-fix.1",
     "@types/chrome": "^0.1.38",
     "@types/express": "^5.0.6",
     "express": "^5.2.1",
