@@ -1,4 +1,4 @@
-import type { Brc105Challenge, Brc105Proof, Brc105Wallet } from "./types"
+import type { Brc105Challenge, Brc105ProofResult, Brc105Wallet } from "./types"
 
 // === Byte encoding helpers ===
 
@@ -211,7 +211,7 @@ export async function constructBrc105Proof(
   challenge: Brc105Challenge,
   wallet: Brc105Wallet,
   origin?: string,
-): Promise<Brc105Proof> {
+): Promise<Brc105ProofResult> {
   // Step 1: Get client's identity key (for inclusion in proof)
   const { publicKey: clientIdentityKey } = await wallet.getPublicKey({ identityKey: true })
 
@@ -264,13 +264,25 @@ export async function constructBrc105Proof(
     throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
   }
 
-  return {
+  const proof = {
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix,
     transaction: transactionBase64,
     clientIdentityKey,
     txid: result.txid,
   }
+
+  const abort = wallet.abortAction
+    ? async () => {
+        try {
+          await wallet.abortAction!({ reference: result.txid })
+        } catch (err) {
+          console.warn('[x402] abortAction failed:', err)
+        }
+      }
+    : undefined
+
+  return { proof, abort }
 }
 
 // Exported for testing
