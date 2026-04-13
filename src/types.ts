@@ -32,6 +32,7 @@ export interface Brc105Wallet {
   ): Promise<{ publicKey: string }>
   createHmac(params: { data: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ hmac: number[] }>
   createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
+  abortAction?: (args: { reference: string }) => Promise<{ aborted: boolean }>
 }
 
 export interface Brc105Proof {
