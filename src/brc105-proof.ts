@@ -247,6 +247,8 @@ export async function constructBrc105Proof(
       }),
     }],
     options: {
+      returnTXIDOnly: false,
+      noSend: true,
       randomizeOutputs: false,
     },
   })
