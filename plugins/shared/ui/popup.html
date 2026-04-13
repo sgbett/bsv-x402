@@ -40,6 +40,16 @@
         </div>
       </section>
 
+      <section id="send-section" class="address-section" hidden>
+        <label>Send</label>
+        <div class="send-form">
+          <input type="text" id="send-address" class="unlock-input" placeholder="BSV address">
+          <input type="number" id="send-amount" class="unlock-input" placeholder="Amount (sats)">
+          <button id="send-btn" class="lock-btn unlocked">Send</button>
+          <div id="send-result" class="unlock-error"></div>
+        </div>
+      </section>
+
       <div class="actions">
         <div id="unlock-form" class="unlock-form" hidden>
           <input type="password" id="unlock-password" class="unlock-input" placeholder="Enter password" autocomplete="current-password">

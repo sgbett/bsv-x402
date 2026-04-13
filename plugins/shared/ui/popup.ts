@@ -90,8 +90,10 @@ function updateWalletPanel(state: PopupState): void {
   // Show/hide address and identity sections based on unlock state
   const addressSection = document.getElementById("address-section") as HTMLDivElement | null;
   const identitySection = document.getElementById("identity-section") as HTMLDivElement | null;
+  const sendSection = document.getElementById("send-section") as HTMLDivElement | null;
   if (addressSection) addressSection.hidden = !state.isUnlocked;
   if (identitySection) identitySection.hidden = !state.isUnlocked;
+  if (sendSection) sendSection.hidden = !state.isUnlocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,6 +354,41 @@ document.addEventListener("DOMContentLoaded", async () => {
     copyAddressBtn.addEventListener("click", async () => {
       const text = document.getElementById("address-display")?.textContent ?? "";
       if (text) await copyToClipboard(text, copyAddressBtn);
+    });
+  }
+
+  // Wallet: Send funds
+  const sendBtn = document.getElementById("send-btn") as HTMLButtonElement | null;
+  if (sendBtn) {
+    sendBtn.addEventListener("click", async () => {
+      const addressInput = document.getElementById("send-address") as HTMLInputElement;
+      const amountInput = document.getElementById("send-amount") as HTMLInputElement;
+      const resultEl = document.getElementById("send-result") as HTMLDivElement;
+
+      const address = addressInput.value.trim();
+      const amount = parseInt(amountInput.value, 10);
+
+      if (!address) { resultEl.textContent = "Enter an address"; return; }
+      if (!amount || amount <= 0) { resultEl.textContent = "Enter a valid amount"; return; }
+
+      sendBtn.disabled = true;
+      resultEl.textContent = "Sending...";
+      resultEl.style.color = "";
+
+      try {
+        const state = await sendMessage({ type: "sendFunds", payload: { address, amount } });
+        const txid = (state as any).sendTxid as string;
+        resultEl.textContent = `Sent! txid: ${txid.slice(0, 12)}...`;
+        resultEl.style.color = "#00d4aa";
+        addressInput.value = "";
+        amountInput.value = "";
+        updateUI(state);
+      } catch (err) {
+        resultEl.textContent = err instanceof Error ? err.message : String(err);
+        resultEl.style.color = "#e74c3c";
+      } finally {
+        sendBtn.disabled = false;
+      }
     });
   }
 
