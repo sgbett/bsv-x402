@@ -191,11 +191,16 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       }
 
       let proof: import("./types").Brc105Proof
+      let abort: (() => Promise<void>) | undefined
       try {
         if (brc105ProofConstructor) {
-          proof = await brc105ProofConstructor(brc105Challenge)
+          const result = await brc105ProofConstructor(brc105Challenge)
+          proof = result.proof
+          abort = result.abort
         } else {
-          proof = await constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
+          const result = await constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
+          proof = result.proof
+          abort = result.abort
         }
       } catch (err) {
         console.error("[x402] Proof construction failed (brc105):", err)
@@ -206,7 +211,25 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       const headers = new Headers(init?.headers)
       headers.set("x-bsv-payment", JSON.stringify(proof))
       headers.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
-      return fetch(input, { ...init, headers })
+
+      let retryResponse: Response
+      try {
+        retryResponse = await fetch(input, { ...init, headers })
+      } catch (err) {
+        // Network error, timeout, etc. — abort to release locked UTXOs
+        if (abort) {
+          await abort()
+          console.warn('[x402] BRC-105 retry fetch failed, UTXOs released via abortAction')
+        }
+        throw err
+      }
+
+      if (!retryResponse.ok && abort) {
+        await abort()
+        console.warn('[x402] Server rejected BRC-105 payment, UTXOs released via abortAction')
+      }
+
+      return retryResponse
     }
 
     // Neither protocol header present — pass through

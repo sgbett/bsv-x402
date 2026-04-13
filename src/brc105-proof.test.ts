@@ -127,7 +127,7 @@ describe("createDerivationSuffix", () => {
 describe("constructBrc105Proof", () => {
   it("returns correct proof shape including clientIdentityKey", async () => {
     const wallet = mockWallet()
-    const proof = await constructBrc105Proof(CHALLENGE, wallet)
+    const { proof } = await constructBrc105Proof(CHALLENGE, wallet)
 
     expect(proof).toHaveProperty("derivationPrefix")
     expect(proof).toHaveProperty("derivationSuffix")
@@ -214,7 +214,7 @@ describe("constructBrc105Proof", () => {
 
   it("includes customInstructions with derivation data and payee", async () => {
     const wallet = mockWallet()
-    const proof = await constructBrc105Proof(CHALLENGE, wallet)
+    const { proof } = await constructBrc105Proof(CHALLENGE, wallet)
 
     const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
     const instructions = JSON.parse(params.outputs[0].customInstructions)
@@ -231,12 +231,50 @@ describe("constructBrc105Proof", () => {
     expect(params.options.randomizeOutputs).toBe(false)
   })
 
+  it("calls createAction with noSend: true and returnTXIDOnly: false", async () => {
+    const wallet = mockWallet()
+    await constructBrc105Proof(CHALLENGE, wallet)
+
+    const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
+    expect(params.options.noSend).toBe(true)
+    expect(params.options.returnTXIDOnly).toBe(false)
+  })
+
+  it("returns abort callback that calls wallet.abortAction with txid", async () => {
+    const abortAction = vi.fn().mockResolvedValue({ aborted: true })
+    const wallet = mockWallet({ abortAction })
+    const { proof, abort } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(abort).toBeDefined()
+    await abort!()
+    expect(abortAction).toHaveBeenCalledOnce()
+    expect(abortAction).toHaveBeenCalledWith({ reference: proof.txid })
+  })
+
+  it("abort callback swallows errors from wallet.abortAction", async () => {
+    const abortAction = vi.fn().mockRejectedValue(new Error("abort failed"))
+    const wallet = mockWallet({ abortAction })
+    const { abort } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(abort).toBeDefined()
+    // Should not throw
+    await expect(abort!()).resolves.toBeUndefined()
+  })
+
+  it("returns undefined abort when wallet lacks abortAction", async () => {
+    const wallet = mockWallet()
+    const { proof, abort } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(proof).toBeDefined()
+    expect(abort).toBeUndefined()
+  })
+
   it("handles rawTx hex string → base64 conversion", async () => {
     const rawTxHex = "deadbeef"
     const wallet = mockWallet({
       createAction: vi.fn().mockResolvedValue({ txid: "aabb", rawTx: rawTxHex }),
     })
-    const proof = await constructBrc105Proof(CHALLENGE, wallet)
+    const { proof } = await constructBrc105Proof(CHALLENGE, wallet)
 
     // deadbeef → base64 = "3q2+7w=="
     const decoded = atob(proof.transaction)
@@ -256,7 +294,7 @@ describe("constructBrc105Proof", () => {
     const wallet = mockWallet({
       createAction: vi.fn().mockResolvedValue({ txid: "aabb", tx: txBytes }),
     })
-    const proof = await constructBrc105Proof(CHALLENGE, wallet)
+    const { proof } = await constructBrc105Proof(CHALLENGE, wallet)
 
     const decoded = atob(proof.transaction)
     const bytes = Array.from(decoded).map((c) => c.charCodeAt(0))
@@ -272,7 +310,7 @@ describe("constructBrc105Proof", () => {
         rawTx: "deadbeef",
       }),
     })
-    const proof = await constructBrc105Proof(CHALLENGE, wallet)
+    const { proof } = await constructBrc105Proof(CHALLENGE, wallet)
 
     const decoded = atob(proof.transaction)
     const bytes = Array.from(decoded).map((c) => c.charCodeAt(0))

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createX402Fetch, payeeAddressToLockingScript } from "./x402-fetch"
-import type { Brc105Challenge, Brc105Proof } from "./types"
+import type { Brc105Challenge, Brc105ProofResult } from "./types"
 
 function make402Response(amount: number = 1000) {
   return new Response("Payment Required", {
@@ -289,13 +289,15 @@ function makeBrc105Response(
   })
 }
 
-function mockBrc105ProofConstructor(): (challenge: Brc105Challenge) => Promise<Brc105Proof> {
+function mockBrc105ProofConstructor(): (challenge: Brc105Challenge) => Promise<Brc105ProofResult> {
   return vi.fn(async (challenge: Brc105Challenge) => ({
-    derivationPrefix: challenge.derivationPrefix,
-    derivationSuffix: "mock-suffix",
-    transaction: "bW9jay10eA==", // "mock-tx" in base64
-    clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-    txid: "brc105-mock-txid",
+    proof: {
+      derivationPrefix: challenge.derivationPrefix,
+      derivationSuffix: "mock-suffix",
+      transaction: "bW9jay10eA==", // "mock-tx" in base64
+      clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      txid: "brc105-mock-txid",
+    },
   }))
 }
 
@@ -424,5 +426,96 @@ describe("createX402Fetch — BRC-105", () => {
     await f("https://api.example.com/data")
     expect(onProofError).toHaveBeenCalledOnce()
     expect(onProofError).toHaveBeenCalledWith(error, "brc105")
+  })
+
+  it("does not call abort when server returns 200", async () => {
+    const abort = vi.fn()
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it("calls abort when server returns 500", async () => {
+    const abort = vi.fn()
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(500)
+    expect(abort).toHaveBeenCalledOnce()
+  })
+
+  it("handles missing abort gracefully on server failure", async () => {
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(500)
+  })
+
+  it("calls abort when retry fetch throws (network error)", async () => {
+    const abort = vi.fn()
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Failed to fetch")
+    expect(abort).toHaveBeenCalledOnce()
   })
 })

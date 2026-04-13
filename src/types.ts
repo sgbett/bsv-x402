@@ -32,6 +32,7 @@ export interface Brc105Wallet {
   ): Promise<{ publicKey: string }>
   createHmac(params: { data: number[]; protocolID: [number, string]; keyID: string; counterparty?: string }): Promise<{ hmac: number[] }>
   createAction(params: CWICreateActionParams): Promise<CWICreateActionResult>
+  abortAction?: (args: { reference: string }) => Promise<{ aborted: boolean }>
 }
 
 export interface Brc105Proof {
@@ -42,7 +43,12 @@ export interface Brc105Proof {
   txid: string         // from wallet createAction result
 }
 
-export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105Proof>
+export interface Brc105ProofResult {
+  proof: Brc105Proof
+  abort?: () => Promise<void>
+}
+
+export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105ProofResult>
 
 // === Protocol-agnostic payment request ===
 
