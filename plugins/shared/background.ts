@@ -6,6 +6,7 @@ import { BuiltInWalletBackend } from './builtin-wallet-backend'
 import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
 import { resolveApproval, handleWindowClosed } from './pending-approvals'
+import { payeeAddressToLockingScript, verifyBase58Checksum } from '../../src/x402-fetch'
 
 // Helper: fetch current wallet balance (for autospend tier clamping)
 async function getWalletBalance(): Promise<number> {
@@ -174,6 +175,7 @@ interface InternalMessage {
     | 'getSpendStatus'
     | 'openPopupTab'
     | 'approvalResponse'
+    | 'sendFunds'
   payload?: unknown
 }
 
@@ -259,6 +261,44 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       if (!payload?.type) throw new Error('Backend type required')
       await wallet.switchBackend(payload.type, payload.extensionId ? { extensionId: payload.extensionId } : undefined)
       break
+    }
+
+    case 'sendFunds': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const payload = message.payload as { address: string; amount: number } | undefined
+      if (!payload?.address || !payload?.amount) throw new Error('Address and amount required')
+
+      const amount = Math.floor(payload.amount)
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Amount must be a positive integer')
+
+      // Verify address checksum (async — catches typos before spending)
+      await verifyBase58Checksum(payload.address)
+
+      // Build P2PKH locking script
+      const lockingScript = payeeAddressToLockingScript(payload.address)
+
+      // Create and broadcast the transaction
+      const backend = wallet.getBackend()
+      const result = await backend.call('createAction', {
+        outputs: [{
+          satoshis: amount,
+          lockingScript,
+          outputDescription: `Send to ${payload.address}`,
+        }],
+        labels: ['wallet-send'],
+        description: `Send ${amount} sats to ${payload.address}`,
+        options: {
+          noSend: false,
+          returnTXIDOnly: false,
+        },
+      }, 'self') as { txid: string }
+
+      const walletState = await wallet.getWalletState()
+      if (wallet.isUnlocked() && walletState.balance !== undefined) {
+        x402.clampToWallet(Number(walletState.balance) || 0)
+      }
+      const x402State = x402.getX402State()
+      return { ...walletState, ...x402State, sendTxid: result.txid }
     }
 
     default:
