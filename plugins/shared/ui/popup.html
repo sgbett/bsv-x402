@@ -40,22 +40,14 @@
         </div>
       </section>
 
-      <section id="send-section" class="address-section" hidden>
-        <label>Send</label>
-        <div class="send-form">
-          <input type="text" id="send-address" class="unlock-input" placeholder="BSV address">
-          <input type="number" id="send-amount" class="unlock-input" placeholder="Amount (sats)">
-          <button id="send-btn" class="lock-btn unlocked">Send</button>
-          <div id="send-result" class="unlock-error"></div>
-        </div>
-      </section>
-
       <div class="actions">
         <div id="unlock-form" class="unlock-form" hidden>
           <input type="password" id="unlock-password" class="unlock-input" placeholder="Enter password" autocomplete="current-password">
           <div id="unlock-error" class="unlock-error"></div>
         </div>
         <button id="lock-btn" class="lock-btn locked">Unlock</button>
+        <button id="verify-utxos-btn" class="lock-btn unlocked" hidden>Verify UTXOs</button>
+        <div id="verify-result" class="unlock-error"></div>
       </div>
 
       <div id="setup-container" class="setup-container" hidden>
@@ -105,7 +97,7 @@
       </section>
 
       <section class="pickups">
-        <label>Pickups</label>
+        <label>Pickups (recharge autospend)</label>
         <div class="pickup-buttons">
           <button class="pickup-btn" data-pickup="Medkit">Medkit +10%</button>
           <button class="pickup-btn" data-pickup="Stimpak">Stimpak +25%</button>
@@ -121,6 +113,16 @@
           <option value="badge">Badge</option>
           <option value="hidden">Hidden</option>
         </select>
+      </section>
+
+      <section id="send-section" class="address-section">
+        <label>Send</label>
+        <div class="send-form">
+          <input type="text" id="send-address" class="unlock-input" placeholder="BSV address">
+          <input type="number" id="send-amount" class="unlock-input" placeholder="Amount (sats)">
+          <button id="send-btn" class="lock-btn unlocked">Send</button>
+          <div id="send-result" class="unlock-error"></div>
+        </div>
       </section>
     </div>
 

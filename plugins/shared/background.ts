@@ -176,6 +176,7 @@ interface InternalMessage {
     | 'openPopupTab'
     | 'approvalResponse'
     | 'sendFunds'
+    | 'verifyUtxos'
   payload?: unknown
 }
 
@@ -301,6 +302,23 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       return { ...walletState, ...x402State, sendTxid: result.txid }
     }
 
+    case 'verifyUtxos': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const backend = wallet.getBackend()
+      // Janitor: check all spendable outputs against the chain, mark spent ones as unspendable
+      const result = await backend.call('listOutputs', {
+        basket: '5a76fd430a311f8bc0553859061710a4475c19fed46e2ff95969aa918e612e57',
+        tags: ['release', 'all'],
+        tagQueryMode: 'all',
+      }, 'self') as { totalOutputs: number; outputs: Array<{ outpoint: string; satoshis: number }> }
+      const walletState = await wallet.getWalletState()
+      if (wallet.isUnlocked() && walletState.balance !== undefined) {
+        x402.clampToWallet(Number(walletState.balance) || 0)
+      }
+      const x402State = x402.getX402State()
+      return { ...walletState, ...x402State, invalidOutputs: result.totalOutputs }
+    }
+
     default:
       throw new Error(`Unknown message type: ${(message as InternalMessage).type}`)
   }
@@ -336,7 +354,11 @@ chrome.runtime.onMessage.addListener(
       chrome.alarms.create('auto-lock', { delayInMinutes: 15, periodInMinutes: 15 })
 
       handleCWIRequest(message, wallet.getBackend(), sender.tab?.id)
-        .then((response) => sendResponse(response))
+        .then((response) => {
+          sendResponse(response)
+          // Notify popup of potential balance change after CWI payment
+          chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
+        })
         .catch((err) => {
           sendResponse({
             id: message.request.id,

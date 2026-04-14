@@ -90,10 +90,10 @@ function updateWalletPanel(state: PopupState): void {
   // Show/hide address and identity sections based on unlock state
   const addressSection = document.getElementById("address-section") as HTMLDivElement | null;
   const identitySection = document.getElementById("identity-section") as HTMLDivElement | null;
-  const sendSection = document.getElementById("send-section") as HTMLDivElement | null;
+  const verifyBtn = document.getElementById("verify-utxos-btn") as HTMLButtonElement | null;
   if (addressSection) addressSection.hidden = !state.isUnlocked;
   if (identitySection) identitySection.hidden = !state.isUnlocked;
-  if (sendSection) sendSection.hidden = !state.isUnlocked;
+  if (verifyBtn) verifyBtn.hidden = !state.isUnlocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +354,35 @@ document.addEventListener("DOMContentLoaded", async () => {
     copyAddressBtn.addEventListener("click", async () => {
       const text = document.getElementById("address-display")?.textContent ?? "";
       if (text) await copyToClipboard(text, copyAddressBtn);
+    });
+  }
+
+  // Wallet: Verify UTXOs (janitor)
+  const verifyUtxosBtn = document.getElementById("verify-utxos-btn") as HTMLButtonElement | null;
+  if (verifyUtxosBtn) {
+    verifyUtxosBtn.addEventListener("click", async () => {
+      const resultEl = document.getElementById("verify-result") as HTMLDivElement;
+      verifyUtxosBtn.disabled = true;
+      verifyUtxosBtn.textContent = "Verifying...";
+      resultEl.textContent = "";
+      try {
+        const state = await sendMessage({ type: "verifyUtxos" });
+        const invalid = (state as any).invalidOutputs as number;
+        if (invalid > 0) {
+          resultEl.textContent = `Released ${invalid} invalid output${invalid > 1 ? "s" : ""}`;
+          resultEl.style.color = "#f1c40f";
+        } else {
+          resultEl.textContent = "All outputs verified";
+          resultEl.style.color = "#00d4aa";
+        }
+        updateUI(state);
+      } catch (err) {
+        resultEl.textContent = err instanceof Error ? err.message : String(err);
+        resultEl.style.color = "#e74c3c";
+      } finally {
+        verifyUtxosBtn.disabled = false;
+        verifyUtxosBtn.textContent = "Verify UTXOs";
+      }
     });
   }
 
