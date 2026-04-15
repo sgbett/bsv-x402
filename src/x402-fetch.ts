@@ -320,10 +320,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       let proof: import("./types").Brc105Proof
       let abort: (() => Promise<void>) | undefined
+      let broadcast: (() => Promise<void>) | undefined
       try {
         const result = await buildProof()
         proof = result.proof
         abort = result.abort
+        broadcast = result.broadcast
       } catch (err) {
         console.error("[x402] Proof construction failed (brc105):", err)
         config.onProofError?.(err, "brc105")
@@ -357,6 +359,9 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       // Success
       if (retryResponse!.ok) {
+        if (broadcast) {
+          broadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
         await processPendingBeefs(retryResponse!)
         return retryResponse!
       }
@@ -373,10 +378,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       let freshProof: import("./types").Brc105Proof
       let freshAbort: (() => Promise<void>) | undefined
+      let freshBroadcast: (() => Promise<void>) | undefined
       try {
         const result = await buildProof()
         freshProof = result.proof
         freshAbort = result.abort
+        freshBroadcast = result.broadcast
       } catch (err) {
         console.error("[x402] Fresh proof construction failed (brc105):", err)
         config.onProofError?.(err, "brc105")
@@ -395,7 +402,11 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         )
       }
 
-      if (!freshResponse.ok && freshAbort) {
+      if (freshResponse.ok) {
+        if (freshBroadcast) {
+          freshBroadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
+      } else if (freshAbort) {
         try {
           await freshAbort()
           console.warn('[x402] Server rejected fresh BRC-105 payment, UTXOs released via abortAction')
@@ -446,10 +457,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       let proof: import("./types").Brc121Proof
       let abort: (() => Promise<void>) | undefined
+      let broadcast: (() => Promise<void>) | undefined
       try {
         const result = await buildProof()
         proof = result.proof
         abort = result.abort
+        broadcast = result.broadcast
       } catch (err) {
         console.error("[x402] Proof construction failed (brc121):", err)
         config.onProofError?.(err, "brc121")
@@ -483,6 +496,9 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       // Success
       if (retryResponse!.ok) {
+        if (broadcast) {
+          broadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
         await processPendingBeefs(retryResponse!)
         return retryResponse!
       }
@@ -499,10 +515,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       let freshProof: import("./types").Brc121Proof
       let freshAbort: (() => Promise<void>) | undefined
+      let freshBroadcast: (() => Promise<void>) | undefined
       try {
         const result = await buildProof()
         freshProof = result.proof
         freshAbort = result.abort
+        freshBroadcast = result.broadcast
       } catch (err) {
         console.error("[x402] Fresh proof construction failed (brc121):", err)
         config.onProofError?.(err, "brc121")
@@ -521,7 +539,11 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         )
       }
 
-      if (!freshResponse.ok && freshAbort) {
+      if (freshResponse.ok) {
+        if (freshBroadcast) {
+          freshBroadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
+      } else if (freshAbort) {
         try {
           await freshAbort()
           console.warn('[x402] Server rejected fresh BRC-121 payment, UTXOs released via abortAction')
