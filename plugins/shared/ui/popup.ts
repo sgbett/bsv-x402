@@ -281,17 +281,17 @@ document.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // x402: Indicator mode — load saved value
-  const indicatorSelect = $<HTMLSelectElement>("indicator-mode-select");
-  chrome.storage.local.get("x402_indicator_mode", (result) => {
-    const mode = result.x402_indicator_mode as string | undefined;
-    if (mode) indicatorSelect.value = mode;
-  });
-
-  // x402: Indicator mode — save on change
-  indicatorSelect.addEventListener("change", () => {
-    chrome.storage.local.set({ x402_indicator_mode: indicatorSelect.value });
-  });
+  // x402: Indicator mode — load/save (hidden until #115 is implemented)
+  const indicatorSelect = document.getElementById("indicator-mode-select") as HTMLSelectElement | null;
+  if (indicatorSelect) {
+    chrome.storage.local.get("x402_indicator_mode", (result) => {
+      const mode = result.x402_indicator_mode as string | undefined;
+      if (mode) indicatorSelect.value = mode;
+    });
+    indicatorSelect.addEventListener("change", () => {
+      chrome.storage.local.set({ x402_indicator_mode: indicatorSelect.value });
+    });
+  }
 
   // x402: Tier change
   $<HTMLSelectElement>("tier-select").addEventListener("change", async (e) => {
