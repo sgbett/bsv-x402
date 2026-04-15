@@ -10,6 +10,14 @@
 
 export type WocNetwork = 'main' | 'test'
 
+/** Thrown when WoC returns HTTP 429 — used by callers to stop further requests. */
+export class WocRateLimitError extends Error {
+  constructor() {
+    super('WoC rate limit exceeded (429)')
+    this.name = 'WocRateLimitError'
+  }
+}
+
 /**
  * Check whether a specific outpoint is spent on-chain.
  *
@@ -28,36 +36,27 @@ export async function checkOutpointSpent(
 
   try {
     const res = await fetch(url, { signal: ctrl.signal })
-    clearTimeout(timer)
 
     if (res.ok) {
-      // WoC returns the spending txid as a JSON string when the outpoint is spent
       return true
     }
 
     if (res.status === 404) {
-      // Unspent, or vout index out of range — either way, not spent
       return false
     }
 
     if (res.status === 429) {
-      throw new Error('WoC rate limit exceeded (429)')
+      throw new WocRateLimitError()
     }
 
     throw new Error(`WoC returned unexpected status ${res.status}`)
   } catch (err) {
-    clearTimeout(timer)
-
-    // Re-throw our own errors (rate limit, unexpected status)
-    if (err instanceof Error && !err.name.includes('Abort')) {
-      throw err
-    }
-
-    // AbortError from timeout
+    // Wrap AbortError from timeout into a plain Error
     if (err instanceof DOMException || (err instanceof Error && err.name === 'AbortError')) {
       throw new Error('WoC request timed out after 8 seconds')
     }
-
     throw err
+  } finally {
+    clearTimeout(timer)
   }
 }

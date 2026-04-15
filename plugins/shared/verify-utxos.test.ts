@@ -131,7 +131,7 @@ describe('verifyUtxos', () => {
     checkOutpointSpent
       .mockResolvedValueOnce(false) // output 0: unspent
       .mockResolvedValueOnce(false) // output 1: unspent
-      .mockRejectedValueOnce(new Error('WoC rate limit exceeded (429)'))
+      .mockRejectedValueOnce(new checkModule.WocRateLimitError())
       .mockResolvedValueOnce(false) // output 3: unspent
       .mockResolvedValueOnce(false) // output 4: unspent
 

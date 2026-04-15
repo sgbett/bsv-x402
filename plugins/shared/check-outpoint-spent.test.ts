@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { checkOutpointSpent } from './check-outpoint-spent'
+import { checkOutpointSpent, WocRateLimitError } from './check-outpoint-spent'
 
 const TXID = 'aabbccddee00112233445566778899aabbccddee00112233445566778899aabb'
 const SPENDING_TXID = '"ff00112233445566778899aabbccddee00112233445566778899aabbccddee00"'
@@ -54,7 +54,7 @@ describe('checkOutpointSpent', () => {
   it('throws on rate limit (429)', async () => {
     fetchSpy.mockResolvedValueOnce(new Response('Rate limited', { status: 429 }))
 
-    await expect(checkOutpointSpent(TXID, 0, 'main')).rejects.toThrow('rate limit')
+    await expect(checkOutpointSpent(TXID, 0, 'main')).rejects.toBeInstanceOf(WocRateLimitError)
   })
 
   it('throws on unexpected status codes', async () => {

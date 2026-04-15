@@ -1,5 +1,5 @@
 import type { WalletBackend } from './wallet-backend'
-import { checkOutpointSpent, type WocNetwork } from './check-outpoint-spent'
+import { checkOutpointSpent, WocRateLimitError, type WocNetwork } from './check-outpoint-spent'
 
 export interface VerifyResult {
   checked: number
@@ -23,7 +23,7 @@ export async function verifyUtxos(
   // List all spendable outputs from the default basket
   const { outputs } = await backend.call('listOutputs', {
     basket: 'default',
-    limit: 10000,
+    limit: 10000, // effectively "all" — wallets rarely exceed this
   }, 'self') as { totalOutputs: number; outputs: Array<{ outpoint: string; satoshis: number; spendable: boolean }> }
 
   const spendable = outputs.filter((o) => o.spendable)
@@ -63,8 +63,7 @@ export async function verifyUtxos(
           }
         }
       } else {
-        // Check if rate-limited — stop processing further batches
-        if (r.reason instanceof Error && r.reason.message.includes('429')) {
+        if (r.reason instanceof WocRateLimitError) {
           rateLimited = true
         }
         result.failed++
