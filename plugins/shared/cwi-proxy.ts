@@ -97,11 +97,14 @@ export async function handleCWIRequest(
         if (params?.tx && params?.outputs) {
           const tx = Transaction.fromAtomicBEEF(params.tx)
 
+          const seen = new Set<number>()
           let refundSats = 0
           for (const o of params.outputs) {
-            if (o.protocol === 'wallet payment') {
+            if (o.protocol === 'wallet payment' && !seen.has(o.outputIndex)) {
+              seen.add(o.outputIndex)
               const output = tx.outputs[o.outputIndex]
               if (output?.satoshis != null) {
+                if (!Number.isSafeInteger(refundSats + output.satoshis)) break
                 refundSats += output.satoshis
               } else {
                 console.warn(`[x402] internalizeAction: outputIndex ${o.outputIndex} out of range, skipping`)
