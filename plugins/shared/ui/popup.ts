@@ -69,13 +69,13 @@ function updateWalletPanel(state: PopupState): void {
     statusEl.textContent = "Unlocked";
     statusEl.className = "status unlocked";
     lockBtn.textContent = "Lock";
-    lockBtn.className = "lock-btn unlocked";
+    lockBtn.className = "btn lock-btn unlocked";
     if (unlockForm) unlockForm.hidden = true;
   } else {
     statusEl.textContent = "Locked";
     statusEl.className = "status locked";
     lockBtn.textContent = "Unlock";
-    lockBtn.className = "lock-btn locked";
+    lockBtn.className = "btn lock-btn locked";
     // Show password form automatically when locked
     if (unlockForm && unlockPassword) {
       unlockForm.hidden = false;
@@ -90,10 +90,8 @@ function updateWalletPanel(state: PopupState): void {
   // Show/hide address and identity sections based on unlock state
   const addressSection = document.getElementById("address-section") as HTMLDivElement | null;
   const identitySection = document.getElementById("identity-section") as HTMLDivElement | null;
-  const verifyBtn = document.getElementById("verify-utxos-btn") as HTMLButtonElement | null;
   if (addressSection) addressSection.hidden = !state.isUnlocked;
   if (identitySection) identitySection.hidden = !state.isUnlocked;
-  if (verifyBtn) verifyBtn.hidden = !state.isUnlocked;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,9 +194,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateWalletPanel(state);
     updateX402Panel(state);
 
-    // Hide x402 panel when wallet is locked — autospend is meaningless without a wallet
+    // Hide x402 and tools panels when wallet is locked
     const x402Panel = document.getElementById("x402-panel");
+    const toolsPanel = document.getElementById("tools-panel");
     if (x402Panel) x402Panel.hidden = !state.isUnlocked;
+    if (toolsPanel) toolsPanel.hidden = !state.isUnlocked;
   }
 
   try {
