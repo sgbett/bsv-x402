@@ -185,6 +185,7 @@ export interface CWICreateActionParams {
     returnTXIDOnly?: boolean
     noSend?: boolean
     randomizeOutputs?: boolean
+    sendWith?: string[]
   }
 }
 
