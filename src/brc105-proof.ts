@@ -282,7 +282,21 @@ export async function constructBrc105Proof(
       }
     : undefined
 
-  return { proof, abort }
+  const broadcast = wallet.createAction
+    ? async () => {
+        try {
+          await wallet.createAction({
+            description: 'Broadcast x402 payment',
+            outputs: [],
+            options: { sendWith: [result.txid] },
+          })
+        } catch (err) {
+          console.warn('[x402] broadcast failed:', err)
+        }
+      }
+    : undefined
+
+  return { proof, abort, broadcast }
 }
 
 // Exported for testing
