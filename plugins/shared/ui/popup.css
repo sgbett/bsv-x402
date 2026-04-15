@@ -53,6 +53,9 @@ input {
   margin-bottom: 8px;
 }
 input:focus { border-color: #00d4aa; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
 input:last-child { margin-bottom: 0px; }
 
 .balance span, #balance-display {
