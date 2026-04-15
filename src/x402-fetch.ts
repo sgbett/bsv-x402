@@ -226,15 +226,18 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       let proof: import("./types").Brc105Proof
       let abort: (() => Promise<void>) | undefined
+      let broadcast: (() => Promise<void>) | undefined
       try {
         if (brc105ProofConstructor) {
           const result = await brc105ProofConstructor(brc105Challenge)
           proof = result.proof
           abort = result.abort
+          broadcast = result.broadcast
         } else {
           const result = await constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
           proof = result.proof
           abort = result.abort
+          broadcast = result.broadcast
         }
       } catch (err) {
         console.error("[x402] Proof construction failed (brc105):", err)
@@ -258,7 +261,9 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         throw err
       }
 
-      if (!retryResponse.ok && abort) {
+      if (retryResponse.ok && broadcast) {
+        await broadcast()
+      } else if (!retryResponse.ok && abort) {
         await abort()
         console.warn('[x402] Server rejected BRC-105 payment, UTXOs released via abortAction')
       }

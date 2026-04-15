@@ -282,7 +282,20 @@ export async function constructBrc105Proof(
       }
     : undefined
 
-  return { proof, abort }
+  // Broadcast the noSend tx by calling createAction with sendWith
+  const broadcast = async () => {
+    try {
+      await wallet.createAction({
+        description: 'Broadcast payment',
+        outputs: [],
+        options: { sendWith: [result.txid] },
+      })
+    } catch (err) {
+      console.warn('[x402] broadcast via sendWith failed:', err)
+    }
+  }
+
+  return { proof, abort, broadcast }
 }
 
 // Exported for testing
