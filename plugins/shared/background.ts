@@ -7,6 +7,7 @@ import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
 import { resolveApproval, handleWindowClosed } from './pending-approvals'
 import { payeeAddressToLockingScript, verifyBase58Checksum } from '../../src/x402-fetch'
+import { verifyUtxos } from './verify-utxos'
 
 // Helper: fetch current wallet balance (for autospend tier clamping)
 async function getWalletBalance(): Promise<number> {
@@ -305,18 +306,19 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
     case 'verifyUtxos': {
       if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
       const backend = wallet.getBackend()
-      // Janitor: check all spendable outputs against the chain, mark spent ones as unspendable
-      const result = await backend.call('listOutputs', {
-        basket: '5a76fd430a311f8bc0553859061710a4475c19fed46e2ff95969aa918e612e57',
-        tags: ['release', 'all'],
-        tagQueryMode: 'all',
-      }, 'self') as { totalOutputs: number; outputs: Array<{ outpoint: string; satoshis: number }> }
+      const verifyResult = await verifyUtxos(backend, wallet.getNetwork())
+
+      // Notify popup of balance change if any outputs were relinquished
+      if (verifyResult.relinquished > 0) {
+        chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
+      }
+
       const walletState = await wallet.getWalletState()
       if (wallet.isUnlocked() && walletState.balance !== undefined) {
         x402.clampToWallet(Number(walletState.balance) || 0)
       }
       const x402State = x402.getX402State()
-      return { ...walletState, ...x402State, invalidOutputs: result.totalOutputs }
+      return { ...walletState, ...x402State, verifyResult }
     }
 
     default:
