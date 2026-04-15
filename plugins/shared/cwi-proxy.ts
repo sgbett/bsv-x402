@@ -1,6 +1,7 @@
 import type { ContentToBackgroundMessage, CWIResponse } from './messages'
 import type { WalletBackend } from './wallet-backend'
-import { checkSpendLimits, recordPayment, getSpendStatus } from './x402-controller'
+import { checkSpendLimits, recordPayment, recordRefund, getSpendStatus } from './x402-controller'
+import { Transaction } from '@bsv/sdk'
 import { requestApproval } from './pending-approvals'
 import type { PaymentRequest } from '../../src/types'
 
@@ -82,6 +83,48 @@ export async function handleCWIRequest(
             void chrome.runtime?.lastError
           })
         }
+      }
+    }
+
+    // Record refund on successful internalizeAction — parse BEEF for wallet payment outputs
+    if (request.method === 'internalizeAction' && result != null) {
+      try {
+        const params = request.params as {
+          tx: number[]
+          outputs: Array<{ outputIndex: number; protocol: string }>
+        } | undefined
+
+        if (params?.tx && params?.outputs) {
+          const tx = Transaction.fromAtomicBEEF(params.tx)
+
+          const seen = new Set<number>()
+          let refundSats = 0
+          for (const o of params.outputs) {
+            if (o.protocol === 'wallet payment' && !seen.has(o.outputIndex)) {
+              seen.add(o.outputIndex)
+              const output = tx.outputs[o.outputIndex]
+              if (output?.satoshis != null) {
+                if (!Number.isSafeInteger(refundSats + output.satoshis)) break
+                refundSats += output.satoshis
+              } else {
+                console.warn(`[x402] internalizeAction: outputIndex ${o.outputIndex} out of range, skipping`)
+              }
+            }
+          }
+
+          if (refundSats > 0) {
+            recordRefund(refundSats, Infinity)
+
+            if (senderTabId !== undefined) {
+              const status = getSpendStatus()
+              chrome.tabs.sendMessage(senderTabId, { type: 'spendUpdated', status }, () => {
+                void chrome.runtime?.lastError
+              })
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('[x402] Failed to parse internalizeAction BEEF for refund recording:', err)
       }
     }
 

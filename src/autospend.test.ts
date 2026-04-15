@@ -5,6 +5,7 @@ import {
   PICKUP_PERCENTAGES,
   checkPayment,
   recordPayment,
+  recordRefund,
   applyPickup,
   clampBalanceToTier,
   initialState,
@@ -95,6 +96,62 @@ describe("recordPayment", () => {
   })
 })
 
+describe("recordRefund", () => {
+  const walletBalance = 10_000_000_000
+
+  it("increases balance by the refund amount", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    const result = recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(60_000_000)
+  })
+
+  it("caps refund at tier cap", () => {
+    const state: AutospendState = { balance: 95_000_000 }
+    const result = recordRefund(20_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(100_000_000) // HMP tier cap, not 115M
+  })
+
+  it("caps refund at wallet balance when wallet balance < tier cap", () => {
+    const state: AutospendState = { balance: 40_000_000 }
+    const result = recordRefund(20_000_000, state, HMP, 50_000_000)
+    expect(result.balance).toBe(50_000_000) // wallet balance cap, not 60M
+  })
+
+  it("returns state unchanged for invalid amounts", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    expect(recordRefund(NaN, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(Infinity, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(-100, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(0, state, HMP, walletBalance)).toBe(state)
+  })
+
+  it("refund after spend restores balance correctly", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    let state = initialState(config, walletBalance) // 100_000_000
+    state = recordPayment(30_000_000, state) // 70_000_000
+    state = recordRefund(15_000_000, state, config, walletBalance) // 85_000_000
+    expect(state.balance).toBe(85_000_000)
+  })
+
+  it("refund at full balance is a no-op", () => {
+    const state: AutospendState = { balance: 100_000_000 } // at HMP tier cap
+    const result = recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(100_000_000)
+  })
+
+  it("refund after full depletion restores balance to refund amount", () => {
+    const state: AutospendState = { balance: 0 }
+    const result = recordRefund(25_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(25_000_000)
+  })
+
+  it("does not mutate the input state", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(state.balance).toBe(50_000_000)
+  })
+})
+
 describe("applyPickup", () => {
   const walletBalance = 10_000_000_000 // 100 BSV, well above any tier cap
 
@@ -176,6 +233,54 @@ describe("initialState", () => {
 
   it("starts at wallet balance when lower than tier cap", () => {
     const state = initialState(HMP, 50_000_000)
+    expect(state.balance).toBe(50_000_000)
+  })
+})
+
+describe("spend/refund cycle integration", () => {
+  it("spend then partial refund yields correct net spend", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(50_000, state) // 99_950_000
+    expect(state.balance).toBe(99_950_000)
+
+    state = recordRefund(30_000, state, config, walletBalance) // 99_980_000
+    expect(state.balance).toBe(99_980_000)
+  })
+
+  it("refund exceeding original spend is capped at tier cap", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(50_000, state) // 99_950_000
+    state = recordRefund(100_000, state, config, walletBalance) // capped at 100_000_000
+    expect(state.balance).toBe(100_000_000)
+  })
+
+  it("multiple spend/refund cycles yield correct net balance", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(10_000, state)   // 99_990_000
+    state = recordPayment(20_000, state)   // 99_970_000
+    state = recordRefund(15_000, state, config, walletBalance) // 99_985_000
+    state = recordPayment(5_000, state)    // 99_980_000
+    state = recordRefund(10_000, state, config, walletBalance) // 99_990_000
+    // net: -10k -20k +15k -5k +10k = -10k
+    expect(state.balance).toBe(99_990_000)
+  })
+
+  it("wallet balance constrains refund during cycle", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 50_000_000 // below tier cap of 100M
+    let state = initialState(config, walletBalance) // 50_000_000
+
+    state = recordPayment(10_000, state) // 49_990_000
+    state = recordRefund(20_000, state, config, walletBalance) // capped at 50_000_000
     expect(state.balance).toBe(50_000_000)
   })
 })
