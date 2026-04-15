@@ -175,14 +175,82 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const brc105ProofConstructor = config.brc105ProofConstructor
   const brc105Wallet = config.brc105Wallet
   const maxRetries = config.maxRetries ?? 2
+  const ackWallet = config.ackWallet
+  const serverIdentityKey = config.serverIdentityKey
+  const ackedTxids = new Set<string>()
+  const internalisedTxids = new Set<string>()
+
+  function injectAckHeader(headers: Headers): void {
+    if (ackedTxids.size > 0) {
+      headers.set('x-bsv-ack', [...ackedTxids].join(','))
+      ackedTxids.clear()
+    }
+  }
+
+  async function processPendingBeefs(response: Response): Promise<void> {
+    if (!ackWallet) return
+
+    let body: any
+    try {
+      const clone = response.clone()
+      body = await clone.json()
+    } catch {
+      return // Not JSON — nothing to process
+    }
+
+    if (!Array.isArray(body?.pendingBeefs)) return
+
+    for (const entry of body.pendingBeefs) {
+      if (!entry?.txid || !entry?.beef) continue
+      if (!entry.derivationPrefix || !entry.derivationSuffix) continue
+
+      if (internalisedTxids.has(entry.txid)) {
+        ackedTxids.add(entry.txid)
+        continue
+      }
+
+      const senderKey = entry.senderIdentityKey ?? serverIdentityKey
+      if (!senderKey) {
+        console.warn(`[x402] Cannot internalise BEEF ${entry.txid}: no senderIdentityKey`)
+        continue
+      }
+
+      try {
+        const txBytes = Array.from(atob(entry.beef), c => c.charCodeAt(0))
+        await ackWallet.internalizeAction({
+          tx: txBytes,
+          outputs: [{
+            outputIndex: entry.outputIndex ?? 0,
+            protocol: 'wallet payment',
+            paymentRemittance: {
+              derivationPrefix: entry.derivationPrefix,
+              derivationSuffix: entry.derivationSuffix,
+              senderIdentityKey: senderKey,
+            },
+          }],
+          description: 'x402 refund receipt',
+        })
+        internalisedTxids.add(entry.txid)
+        ackedTxids.add(entry.txid)
+      } catch (err) {
+        console.warn(`[x402] Failed to internalise BEEF ${entry.txid}:`, err)
+        // Do NOT ack — server will re-deliver
+      }
+    }
+  }
 
   return async function x402Fetch(
     input: RequestInfo | URL,
     init?: RequestInit,
   ): Promise<Response> {
-    const response = await fetch(input, init)
+    const initialHeaders = new Headers(init?.headers)
+    injectAckHeader(initialHeaders)
+    const response = await fetch(input, { ...init, headers: initialHeaders })
 
-    if (response.status !== 402) return response
+    if (response.status !== 402) {
+      await processPendingBeefs(response)
+      return response
+    }
 
     const origin = extractOrigin(input)
 
@@ -208,7 +276,10 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       const headers = new Headers(init?.headers)
       headers.set("X402-Proof", JSON.stringify(proof))
-      return fetch(input, { ...init, headers })
+      injectAckHeader(headers)
+      const retryResp = await fetch(input, { ...init, headers })
+      await processPendingBeefs(retryResp)
+      return retryResp
     }
 
     // BRC-105 protocol: x-bsv-payment-version header present
@@ -238,6 +309,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         const h = new Headers(init?.headers)
         h.set("x-bsv-payment", JSON.stringify(proof))
         h.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
+        injectAckHeader(h)
         return h
       }
 
@@ -279,7 +351,10 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       }
 
       // Success
-      if (retryResponse!.ok) return retryResponse!
+      if (retryResponse!.ok) {
+        await processPendingBeefs(retryResponse!)
+        return retryResponse!
+      }
 
       // --- Server rejection: abort, then single fresh retry ---
       if (abort) {
@@ -324,10 +399,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         }
       }
 
+      await processPendingBeefs(freshResponse)
       return freshResponse
     }
 
     // Neither protocol header present — pass through
+    await processPendingBeefs(response)
     return response
   }
 }

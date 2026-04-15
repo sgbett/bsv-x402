@@ -811,3 +811,460 @@ describe("createX402Fetch — BRC-105", () => {
     expect(brc105Proof).toHaveBeenCalledTimes(2)
   })
 })
+
+// === BEEF acknowledgement tests ===
+
+function make200WithPendingBeefs(beefs: Array<{
+  txid: string
+  beef: string
+  derivationPrefix: string
+  derivationSuffix: string
+  outputIndex?: number
+  senderIdentityKey?: string
+}>) {
+  return new Response(JSON.stringify({ pendingBeefs: beefs }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function makePendingBeef(overrides: Partial<{
+  txid: string
+  beef: string
+  derivationPrefix: string
+  derivationSuffix: string
+  outputIndex: number
+  senderIdentityKey: string
+}> = {}) {
+  return {
+    txid: overrides.txid ?? 'beef-txid-1',
+    beef: overrides.beef ?? btoa('test beef data'),
+    derivationPrefix: overrides.derivationPrefix ?? 'prefix-1',
+    derivationSuffix: overrides.derivationSuffix ?? 'suffix-1',
+    ...(overrides.outputIndex !== undefined ? { outputIndex: overrides.outputIndex } : {}),
+    ...(overrides.senderIdentityKey !== undefined ? { senderIdentityKey: overrides.senderIdentityKey } : {}),
+  }
+}
+
+describe("createX402Fetch — BEEF acknowledgement", () => {
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  // --- Ack header injection ---
+
+  it("does not add x-bsv-ack header when no ack wallet configured", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(make200Response())
+    const f = createX402Fetch()
+
+    await f("https://api.example.com/data")
+
+    const call = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const headers = call[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBeNull()
+  })
+
+  it("sends x-bsv-ack with one txid on next request after processing pendingBeefs", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'txid-abc' })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    const secondCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const headers = secondCall[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBe('txid-abc')
+  })
+
+  it("sends x-bsv-ack with multiple txids on next request", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([
+        makePendingBeef({ txid: 'txid-1' }),
+        makePendingBeef({ txid: 'txid-2' }),
+      ]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    const secondCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const headers = secondCall[1]?.headers as Headers
+    const ackHeader = headers.get('x-bsv-ack')!
+    const txids = ackHeader.split(',')
+    expect(txids).toContain('txid-1')
+    expect(txids).toContain('txid-2')
+    expect(txids).toHaveLength(2)
+  })
+
+  it("clears x-bsv-ack after sending — subsequent request has no ack header", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'txid-clear' })]))
+      .mockResolvedValueOnce(make200Response())  // second request carries ack
+      .mockResolvedValueOnce(make200Response())  // third request should not
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+    await f("https://api.example.com/third")
+
+    const thirdCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]
+    const headers = thirdCall[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBeNull()
+  })
+
+  it("includes x-bsv-ack on the initial request (not just retries)", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    // First call gets pendingBeefs, second call should have ack on initial (non-retry) request
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'txid-initial' })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    // The second call is a plain 200, no 402 retry — the ack is on the initial request
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    expect(fetchMock.mock.calls).toHaveLength(2)
+    const secondHeaders = fetchMock.mock.calls[1][1]?.headers as Headers
+    expect(secondHeaders.get('x-bsv-ack')).toBe('txid-initial')
+  })
+
+  // --- Pending BEEF processing ---
+
+  it("internalises each entry in pendingBeefs array via internalizeAction", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    const beefs = [
+      makePendingBeef({ txid: 'tx-a', derivationPrefix: 'pA', derivationSuffix: 'sA' }),
+      makePendingBeef({ txid: 'tx-b', derivationPrefix: 'pB', derivationSuffix: 'sB' }),
+    ]
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(make200WithPendingBeefs(beefs))
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(2)
+
+    // Verify first call parameters
+    const firstCallParams = ackWallet.internalizeAction.mock.calls[0][0]
+    expect(firstCallParams.outputs[0].paymentRemittance.derivationPrefix).toBe('pA')
+    expect(firstCallParams.outputs[0].paymentRemittance.derivationSuffix).toBe('sA')
+    expect(firstCallParams.outputs[0].paymentRemittance.senderIdentityKey).toBe(serverIdentityKey)
+    expect(firstCallParams.description).toBe('x402 refund receipt')
+
+    // Verify tx bytes are decoded from base64
+    const expectedBytes = Array.from(atob(beefs[0].beef), c => c.charCodeAt(0))
+    expect(firstCallParams.tx).toEqual(expectedBytes)
+  })
+
+  it("does not call internalizeAction when response has no pendingBeefs", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    expect(ackWallet.internalizeAction).not.toHaveBeenCalled()
+  })
+
+  it("handles non-JSON response body without error", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response("not json at all", { status: 200 })
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey: 'some-key' })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(ackWallet.internalizeAction).not.toHaveBeenCalled()
+  })
+
+  it("deduplicates same txid within one response — internalizeAction called once", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([
+        makePendingBeef({ txid: 'dup-txid' }),
+        makePendingBeef({ txid: 'dup-txid', derivationSuffix: 'different-suffix' }),
+      ]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    // First call internalises, second is skipped because txid is in internalisedTxids
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+
+    // But the txid should still be acked
+    await f("https://api.example.com/next")
+    const secondCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const headers = secondCall[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBe('dup-txid')
+  })
+
+  it("skips internalizeAction for previously internalised txid but still acks it", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    // First response: internalise txid-re
+    // Second response: re-deliver txid-re — should skip internalizeAction
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'txid-re' })]))
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'txid-re' })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    await f("https://api.example.com/first")   // internalises txid-re
+    await f("https://api.example.com/second")   // re-delivered, skips internalise, acks again
+    await f("https://api.example.com/third")    // should carry ack
+
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+
+    const thirdCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[2]
+    const headers = thirdCall[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBe('txid-re')
+  })
+
+  it("does not ack txid when internalizeAction throws — other entries still processed", async () => {
+    const ackWallet = {
+      internalizeAction: vi.fn()
+        .mockRejectedValueOnce(new Error("wallet error"))
+        .mockResolvedValueOnce({ accepted: true }),
+    }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([
+        makePendingBeef({ txid: 'fail-txid' }),
+        makePendingBeef({ txid: 'ok-txid' }),
+      ]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(2)
+
+    // Only ok-txid should be acked (fail-txid was not added to ackedTxids)
+    const secondCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const headers = secondCall[1]?.headers as Headers
+    expect(headers.get('x-bsv-ack')).toBe('ok-txid')
+  })
+
+  it("skips entries with missing required fields (no derivationPrefix)", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    // Construct response manually with an entry missing derivationPrefix
+    const beefs = [
+      { txid: 'incomplete-txid', beef: btoa('data'), derivationSuffix: 'suffix-1' },
+      { txid: 'complete-txid', beef: btoa('data'), derivationPrefix: 'pref', derivationSuffix: 'suf' },
+    ]
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ pendingBeefs: beefs }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    // Only the complete entry should be internalised
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+    expect(ackWallet.internalizeAction.mock.calls[0][0].outputs[0].paymentRemittance.derivationPrefix).toBe('pref')
+  })
+
+  it("defaults outputIndex to 0 when missing from entry", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    // Entry without outputIndex
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      make200WithPendingBeefs([makePendingBeef({ txid: 'no-idx' })])
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    const params = ackWallet.internalizeAction.mock.calls[0][0]
+    expect(params.outputs[0].outputIndex).toBe(0)
+  })
+
+  // --- End-to-end integration ---
+
+  it("full round-trip: 200 with pendingBeefs → internalised → next request has x-bsv-ack", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([
+        makePendingBeef({ txid: 'round-trip-1' }),
+        makePendingBeef({ txid: 'round-trip-2' }),
+      ]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+
+    // First call: gets pendingBeefs, internalises both
+    const res1 = await f("https://api.example.com/first")
+    expect(res1.status).toBe(200)
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(2)
+
+    // Second call: ack header present with both txids
+    const res2 = await f("https://api.example.com/second")
+    expect(res2.status).toBe(200)
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const ackHeader = (fetchMock.mock.calls[1][1]?.headers as Headers).get('x-bsv-ack')!
+    const txids = ackHeader.split(',')
+    expect(txids).toContain('round-trip-1')
+    expect(txids).toContain('round-trip-2')
+
+    // Caller's response body should still be consumable (response.clone() was used)
+    const body1 = await res1.json()
+    expect(body1.pendingBeefs).toHaveLength(2)
+  })
+
+  it("BRC-105 402 → 200 with pendingBeefs → internalised → next call has ack header", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+    const brc105ProofConstructor = mockBrc105ProofConstructor()
+
+    // 402 → proof → 200 with pendingBeefs
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(500))
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'brc105-ack' })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey, brc105ProofConstructor })
+
+    // First call: 402 → BRC-105 payment → 200 with pendingBeefs → internalised
+    const res1 = await f("https://api.example.com/paid")
+    expect(res1.status).toBe(200)
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+
+    // Second call: should carry x-bsv-ack
+    await f("https://api.example.com/next")
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const nextHeaders = fetchMock.mock.calls[2][1]?.headers as Headers
+    expect(nextHeaders.get('x-bsv-ack')).toBe('brc105-ack')
+  })
+
+  it("no ackWallet in config → full passthrough, no ack headers, no BEEF processing", async () => {
+    // Response has pendingBeefs but no ackWallet configured
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: 'ignored' })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch()
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+
+    // No ack header on either request
+    const firstHeaders = fetchMock.mock.calls[0][1]?.headers as Headers
+    const secondHeaders = fetchMock.mock.calls[1][1]?.headers as Headers
+    expect(firstHeaders.get('x-bsv-ack')).toBeNull()
+    expect(secondHeaders.get('x-bsv-ack')).toBeNull()
+  })
+
+  // --- senderIdentityKey resolution ---
+
+  it("uses per-entry senderIdentityKey when present", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '02server-fallback-key'
+    const entryKey = '02entry-specific-key'
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      make200WithPendingBeefs([makePendingBeef({ txid: 'entry-key-txid', senderIdentityKey: entryKey })])
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    const params = ackWallet.internalizeAction.mock.calls[0][0]
+    expect(params.outputs[0].paymentRemittance.senderIdentityKey).toBe(entryKey)
+  })
+
+  it("falls back to config serverIdentityKey when entry lacks senderIdentityKey", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '02config-fallback-key'
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      make200WithPendingBeefs([makePendingBeef({ txid: 'fallback-txid' })])
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    const params = ackWallet.internalizeAction.mock.calls[0][0]
+    expect(params.outputs[0].paymentRemittance.senderIdentityKey).toBe(serverIdentityKey)
+  })
+
+  it("skips BEEF processing when neither entry nor config provides senderIdentityKey", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    // No serverIdentityKey in config, no senderIdentityKey in entry
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      make200WithPendingBeefs([makePendingBeef({ txid: 'no-key-txid' })])
+    )
+
+    const f = createX402Fetch({ ackWallet })
+    await f("https://api.example.com/data")
+
+    expect(ackWallet.internalizeAction).not.toHaveBeenCalled()
+  })
+
+  it("uses explicit outputIndex from entry when provided", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = '0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce(
+      make200WithPendingBeefs([makePendingBeef({ txid: 'idx-txid', outputIndex: 3 })])
+    )
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey })
+    await f("https://api.example.com/data")
+
+    const params = ackWallet.internalizeAction.mock.calls[0][0]
+    expect(params.outputs[0].outputIndex).toBe(3)
+  })
+})
