@@ -485,7 +485,66 @@ describe("createX402Fetch — BRC-105", () => {
     expect(abort).not.toHaveBeenCalled()
   })
 
-  it("calls abort when server returns 500", async () => {
+  it("calls abort and retries with fresh proof when server returns 500", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: callCount === 1 ? "original-suffix" : "fresh-suffix",
+          transaction: callCount === 1 ? "b3JpZ2luYWw=" : "ZnJlc2g=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: callCount === 1 ? "original-txid" : "fresh-txid",
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).toHaveBeenCalledOnce()
+    expect(freshAbort).not.toHaveBeenCalled()
+    expect(brc105Proof).toHaveBeenCalledTimes(2)
+  })
+
+  it("handles missing abort gracefully on server rejection with fresh retry", async () => {
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: "dHg=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(brc105Proof).toHaveBeenCalledTimes(2)
+  })
+
+  it("throws unknown payment state when all network retries exhausted", async () => {
     const abort = vi.fn()
     const brc105Proof = vi.fn().mockResolvedValue({
       proof: {
@@ -500,37 +559,14 @@ describe("createX402Fetch — BRC-105", () => {
 
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(makeBrc105Response(1000))
-      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockRejectedValue(new TypeError("Failed to fetch"))
 
-    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
-    const res = await f("https://api.example.com/data")
-
-    expect(res.status).toBe(500)
-    expect(abort).toHaveBeenCalledOnce()
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof, maxRetries: 0 })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Payment state unknown")
+    expect(abort).not.toHaveBeenCalled()
   })
 
-  it("handles missing abort gracefully on server failure", async () => {
-    const brc105Proof = vi.fn().mockResolvedValue({
-      proof: {
-        derivationPrefix: "prefix",
-        derivationSuffix: "suffix",
-        transaction: "dHg=",
-        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
-        txid: "abc123",
-      },
-    })
-
-    globalThis.fetch = vi.fn()
-      .mockResolvedValueOnce(makeBrc105Response(1000))
-      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
-
-    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
-    const res = await f("https://api.example.com/data")
-
-    expect(res.status).toBe(500)
-  })
-
-  it("calls abort when retry fetch throws (network error)", async () => {
+  it("retries same proof on network error then succeeds on 200", async () => {
     const abort = vi.fn()
     const brc105Proof = vi.fn().mockResolvedValue({
       proof: {
@@ -546,9 +582,227 @@ describe("createX402Fetch — BRC-105", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(makeBrc105Response(1000))
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof, maxRetries: 1 })
+
+    vi.useFakeTimers()
+    const promise = f("https://api.example.com/data")
+    await vi.advanceTimersByTimeAsync(1000)
+    const res = await promise
+    vi.useRealTimers()
+
+    expect(res.status).toBe(200)
+    expect(abort).not.toHaveBeenCalled()
+    expect(brc105Proof).toHaveBeenCalledOnce()
+
+    // Same x-bsv-payment header reused on both attempts
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const firstRetryHeaders = (fetchMock.mock.calls[1][1]?.headers as Headers).get("x-bsv-payment")
+    const secondRetryHeaders = (fetchMock.mock.calls[2][1]?.headers as Headers).get("x-bsv-payment")
+    expect(firstRetryHeaders).toBe(secondRetryHeaders)
+  })
+
+  it("retries same proof on network error then aborts + fresh retries on 500", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: callCount === 1 ? "original" : "fresh",
+          transaction: callCount === 1 ? "b3JpZw==" : "ZnJlc2g=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: callCount === 1 ? "original-txid" : "fresh-txid",
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof, maxRetries: 1 })
+
+    vi.useFakeTimers()
+    const promise = f("https://api.example.com/data")
+    await vi.advanceTimersByTimeAsync(1000)
+    const res = await promise
+    vi.useRealTimers()
+
+    expect(res.status).toBe(200)
+    // Original proof aborted after 500, fresh proof used for final attempt
+    expect(abort).toHaveBeenCalledOnce()
+    expect(freshAbort).not.toHaveBeenCalled()
+    expect(brc105Proof).toHaveBeenCalledTimes(2)
+  })
+
+  it("reuses same x-bsv-payment header across network retries", async () => {
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+    })
+
+    // Use maxRetries: 0 — single attempt, no delay needed, no timer issues
+    // The "retries same proof on network error then succeeds" test already
+    // proves retry uses the same proof; this test focuses on header identity
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof, maxRetries: 1 })
+
+    vi.useFakeTimers()
+    const promise = f("https://api.example.com/data")
+    await vi.runAllTimersAsync()
+    const res = await promise
+    vi.useRealTimers()
+
+    expect(res.status).toBe(200)
+
+    // Proof constructor called once — same proof reused across retries
+    expect(brc105Proof).toHaveBeenCalledOnce()
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const header1 = (fetchMock.mock.calls[1][1]?.headers as Headers).get("x-bsv-payment")
+    const header2 = (fetchMock.mock.calls[2][1]?.headers as Headers).get("x-bsv-payment")
+    expect(header1).toBe(header2)
+  })
+
+  it("uses different proof on fresh retry after server rejection", async () => {
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: callCount === 1 ? "b3JpZ2luYWw=" : "ZnJlc2g=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort: vi.fn(),
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
 
     const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
-    await expect(f("https://api.example.com/data")).rejects.toThrow("Failed to fetch")
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const originalPayment = (fetchMock.mock.calls[1][1]?.headers as Headers).get("x-bsv-payment")
+    const freshPayment = (fetchMock.mock.calls[2][1]?.headers as Headers).get("x-bsv-payment")
+    expect(originalPayment).not.toBe(freshPayment)
+
+    const original = JSON.parse(originalPayment!)
+    const fresh = JSON.parse(freshPayment!)
+    expect(original.transaction).toBe("b3JpZ2luYWw=")
+    expect(fresh.transaction).toBe("ZnJlc2g=")
+  })
+
+  it("returns error response when server rejects twice (double rejection)", async () => {
+    const abort1 = vi.fn()
+    const abort2 = vi.fn()
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: "dHg=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort: callCount === 1 ? abort1 : abort2,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Bad Request", { status: 400 }))
+      .mockResolvedValueOnce(new Response("Bad Request Again", { status: 400 }))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(400)
+    expect(abort1).toHaveBeenCalledOnce()
+    expect(abort2).toHaveBeenCalledOnce()
+    expect(brc105Proof).toHaveBeenCalledTimes(2)
+  })
+
+  it("throws unknown state when fresh retry gets network error after server rejection", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: "dHg=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Payment state unknown")
+
+    // First proof aborted after server rejection
     expect(abort).toHaveBeenCalledOnce()
+    // Fresh proof NOT aborted (tx may be on-chain)
+    expect(freshAbort).not.toHaveBeenCalled()
+  })
+
+  it("propagates original error when abort() throws during server rejection", async () => {
+    const abort = vi.fn().mockRejectedValue(new Error("abort failed"))
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: "dHg=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("abort failed")
   })
 })
