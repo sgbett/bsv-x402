@@ -1,6 +1,6 @@
 {
   "name": "bsv-x402",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "x402 payment protocol client — a fetch() wrapper that handles 402 payment flows transparently",
   "type": "module",
   "main": "dist/index.cjs",
