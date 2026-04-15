@@ -5,6 +5,7 @@ import {
   WEAPON_CAPS,
   checkPayment,
   recordPayment as recordPaymentFn,
+  recordRefund as recordRefundFn,
   applyPickup as applyPickupFn,
   clampBalanceToTier as clampFn,
   initialState,
@@ -53,6 +54,11 @@ export function checkSpendLimits(request: PaymentRequest): SpendCheckResult {
 /** Deduct a completed payment from the autospend balance. */
 export function recordPayment(amount: number): void {
   state = recordPaymentFn(amount, state)
+}
+
+/** Record a refund — increases autospend balance, capped at tier cap and wallet balance. */
+export function recordRefund(amount: number, walletBalance: number): void {
+  state = recordRefundFn(amount, state, config, walletBalance)
 }
 
 /** Apply a pickup. Caller supplies the current wallet balance for the cap. */
