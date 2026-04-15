@@ -42,14 +42,14 @@
 
       <div class="actions">
         <div id="unlock-form" class="unlock-form" hidden>
-          <input type="password" id="unlock-password" class="unlock-input" placeholder="Enter password" autocomplete="current-password">
+          <input type="password" id="unlock-password" placeholder="Enter password" autocomplete="current-password">
           <div id="unlock-error" class="unlock-error"></div>
         </div>
-        <button id="lock-btn" class="lock-btn locked">Unlock</button>
+        <button id="lock-btn" class="btn lock-btn locked">Unlock</button>
       </div>
 
       <div id="setup-container" class="setup-container" hidden>
-        <button id="setup-btn" class="setup-btn">Set Up Wallet</button>
+        <button id="setup-btn" class="btn setup-btn">Set Up Wallet</button>
       </div>
     </div>
 
@@ -95,7 +95,7 @@
       </section>
 
       <section class="pickups">
-        <label>Pickups</label>
+        <label>Pickups (recharge autospend)</label>
         <div class="pickup-buttons">
           <button class="pickup-btn" data-pickup="Medkit">Medkit +10%</button>
           <button class="pickup-btn" data-pickup="Stimpak">Stimpak +25%</button>
@@ -104,13 +104,25 @@
         </div>
       </section>
 
-      <section class="indicator-mode">
-        <label>Spend Indicator</label>
-        <select id="indicator-mode-select">
-          <option value="bar">Bar</option>
-          <option value="badge">Badge</option>
-          <option value="hidden">Hidden</option>
-        </select>
+      <section id="send-section" class="address-section">
+        <label>Send</label>
+        <div class="send-form">
+          <input type="text" id="send-address" placeholder="BSV address">
+          <input type="number" id="send-amount" placeholder="Amount (sats)">
+          <button id="send-btn" class="btn send-btn">Send</button>
+          <div id="send-result" class="unlock-error"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================================================
+         Tools panel — wallet maintenance
+         ============================================================ -->
+    <div id="tools-panel" hidden>
+      <section class="tier">
+        <label>Tools</label>
+        <button id="verify-utxos-btn" class="btn verify-btn">Verify UTXOs</button>
+        <div id="verify-result" class="unlock-error"></div>
       </section>
     </div>
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createX402Fetch, payeeAddressToLockingScript } from "./x402-fetch"
+import { createX402Fetch, payeeAddressToLockingScript, verifyBase58Checksum } from "./x402-fetch"
 import type { Brc105Challenge, Brc105ProofResult } from "./types"
 
 function make402Response(amount: number = 1000) {
@@ -132,6 +132,39 @@ describe("payeeAddressToLockingScript", () => {
   it("rejects unsupported version byte", () => {
     expect(() => payeeAddressToLockingScript("3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy"))
       .toThrow("Unsupported address version")
+  })
+})
+
+describe("verifyBase58Checksum", () => {
+  it("accepts a valid mainnet address", async () => {
+    await expect(
+      verifyBase58Checksum("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
+    ).resolves.toBeUndefined()
+  })
+
+  it("accepts a valid testnet address", async () => {
+    await expect(
+      verifyBase58Checksum("mfWxJ45yp2SFn7UciZyNpvDKrzbi36LaVX"),
+    ).resolves.toBeUndefined()
+  })
+
+  it("rejects a single-character typo", async () => {
+    // Change last character before the checksum — 'N' → 'M'
+    await expect(
+      verifyBase58Checksum("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfMa"),
+    ).rejects.toThrow("checksum mismatch")
+  })
+
+  it("rejects a truncated address", async () => {
+    await expect(
+      verifyBase58Checksum("1A1zP1eP5QGefi2DMP"),
+    ).rejects.toThrow("Invalid address length")
+  })
+
+  it("rejects invalid Base58 characters", async () => {
+    await expect(
+      verifyBase58Checksum("1A1zP1eP5QGefi2DMPTfTL5SLmv7Divf0O"),
+    ).rejects.toThrow("Invalid Base58 character")
   })
 })
 

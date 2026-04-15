@@ -69,13 +69,13 @@ function updateWalletPanel(state: PopupState): void {
     statusEl.textContent = "Unlocked";
     statusEl.className = "status unlocked";
     lockBtn.textContent = "Lock";
-    lockBtn.className = "lock-btn unlocked";
+    lockBtn.className = "btn lock-btn unlocked";
     if (unlockForm) unlockForm.hidden = true;
   } else {
     statusEl.textContent = "Locked";
     statusEl.className = "status locked";
     lockBtn.textContent = "Unlock";
-    lockBtn.className = "lock-btn locked";
+    lockBtn.className = "btn lock-btn locked";
     // Show password form automatically when locked
     if (unlockForm && unlockPassword) {
       unlockForm.hidden = false;
@@ -194,9 +194,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateWalletPanel(state);
     updateX402Panel(state);
 
-    // Hide x402 panel when wallet is locked — autospend is meaningless without a wallet
+    // Hide x402 and tools panels when wallet is locked
     const x402Panel = document.getElementById("x402-panel");
+    const toolsPanel = document.getElementById("tools-panel");
     if (x402Panel) x402Panel.hidden = !state.isUnlocked;
+    if (toolsPanel) toolsPanel.hidden = !state.isUnlocked;
   }
 
   try {
@@ -352,6 +354,70 @@ document.addEventListener("DOMContentLoaded", async () => {
     copyAddressBtn.addEventListener("click", async () => {
       const text = document.getElementById("address-display")?.textContent ?? "";
       if (text) await copyToClipboard(text, copyAddressBtn);
+    });
+  }
+
+  // Wallet: Verify UTXOs (janitor)
+  const verifyUtxosBtn = document.getElementById("verify-utxos-btn") as HTMLButtonElement | null;
+  if (verifyUtxosBtn) {
+    verifyUtxosBtn.addEventListener("click", async () => {
+      const resultEl = document.getElementById("verify-result") as HTMLDivElement;
+      verifyUtxosBtn.disabled = true;
+      verifyUtxosBtn.textContent = "Verifying...";
+      resultEl.textContent = "";
+      try {
+        const state = await sendMessage({ type: "verifyUtxos" });
+        const invalid = (state as any).invalidOutputs as number;
+        if (invalid > 0) {
+          resultEl.textContent = `Released ${invalid} invalid output${invalid > 1 ? "s" : ""}`;
+          resultEl.style.color = "#f1c40f";
+        } else {
+          resultEl.textContent = "All outputs verified";
+          resultEl.style.color = "#00d4aa";
+        }
+        updateUI(state);
+      } catch (err) {
+        resultEl.textContent = err instanceof Error ? err.message : String(err);
+        resultEl.style.color = "#e74c3c";
+      } finally {
+        verifyUtxosBtn.disabled = false;
+        verifyUtxosBtn.textContent = "Verify UTXOs";
+      }
+    });
+  }
+
+  // Wallet: Send funds
+  const sendBtn = document.getElementById("send-btn") as HTMLButtonElement | null;
+  if (sendBtn) {
+    sendBtn.addEventListener("click", async () => {
+      const addressInput = document.getElementById("send-address") as HTMLInputElement;
+      const amountInput = document.getElementById("send-amount") as HTMLInputElement;
+      const resultEl = document.getElementById("send-result") as HTMLDivElement;
+
+      const address = addressInput.value.trim();
+      const amount = parseInt(amountInput.value, 10);
+
+      if (!address) { resultEl.textContent = "Enter an address"; return; }
+      if (!amount || amount <= 0) { resultEl.textContent = "Enter a valid amount"; return; }
+
+      sendBtn.disabled = true;
+      resultEl.textContent = "Sending...";
+      resultEl.style.color = "";
+
+      try {
+        const state = await sendMessage({ type: "sendFunds", payload: { address, amount } });
+        const txid = (state as any).sendTxid as string;
+        resultEl.textContent = `Sent! txid: ${txid.slice(0, 12)}...`;
+        resultEl.style.color = "#00d4aa";
+        addressInput.value = "";
+        amountInput.value = "";
+        updateUI(state);
+      } catch (err) {
+        resultEl.textContent = err instanceof Error ? err.message : String(err);
+        resultEl.style.color = "#e74c3c";
+      } finally {
+        sendBtn.disabled = false;
+      }
     });
   }
 

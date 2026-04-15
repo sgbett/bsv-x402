@@ -41,6 +41,23 @@ label {
   margin-bottom: 4px;
 }
 
+input {
+  width: 100%;
+  padding: 8px 10px;
+  background: #16213e;
+  color: #e0e0e0;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  font-size: 13px;
+  outline: none;
+  margin-bottom: 8px;
+}
+input:focus { border-color: #00d4aa; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; }
+input:last-child { margin-bottom: 0px; }
+
 .balance span, #balance-display {
   font-size: 20px;
   font-weight: 700;
@@ -90,7 +107,7 @@ label {
 
 .actions { margin: 16px 0 12px; }
 
-.lock-btn {
+.btn {
   width: 100%;
   padding: 10px;
   border: none;
@@ -98,26 +115,21 @@ label {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
+  opacity: 0.85;
   transition: opacity 0.15s;
 }
-.lock-btn:hover { opacity: 0.85; }
-.lock-btn.locked { background: #00d4aa; color: #1a1a2e; }
+
+.btn:hover { opacity: 1; }
+
+.lock-btn.locked { background: #00ffbb; color: #1a1a2e; }
 .lock-btn.unlocked { background: #e04050; color: #fff; }
+
+.send-btn { background: #00bbff; color: #1a1a2e; }
+.verify-btn { background: #ffbb00; color: #1a1a2e; }
 
 .setup-container { margin: 12px 0; }
 
-.setup-btn {
-  width: 100%;
-  padding: 10px;
-  background: #00d4aa;
-  color: #1a1a2e;
-  border: none;
-  border-radius: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.setup-btn:hover { opacity: 0.85; }
+.setup-btn { background: #00ffbb; color: #1a1a2e; }
 
 .address-section { margin-bottom: 14px; }
 .address-row {
@@ -149,17 +161,7 @@ label {
 .copy-btn:hover { background: #00d4aa; color: #1a1a2e; }
 
 .unlock-form { margin-bottom: 8px; }
-.unlock-input {
-  width: 100%;
-  padding: 8px 10px;
-  background: #16213e;
-  color: #e0e0e0;
-  border: 1px solid #2a2a4a;
-  border-radius: 6px;
-  font-size: 13px;
-  outline: none;
-}
-.unlock-input:focus { border-color: #00d4aa; }
+
 .unlock-error {
   color: #f06060;
   font-size: 12px;
