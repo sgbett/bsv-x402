@@ -174,6 +174,7 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const constructProof = config.proofConstructor ?? defaultConstructProof
   const brc105ProofConstructor = config.brc105ProofConstructor
   const brc105Wallet = config.brc105Wallet
+  const maxRetries = config.maxRetries ?? 2
 
   return async function x402Fetch(
     input: RequestInfo | URL,
@@ -224,46 +225,98 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         return response
       }
 
+      // Helper: build proof using whichever constructor is configured
+      const buildProof = async () => {
+        if (brc105ProofConstructor) {
+          return brc105ProofConstructor(brc105Challenge)
+        }
+        return constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
+      }
+
+      // Helper: build headers from a proof
+      const proofHeaders = (proof: import("./types").Brc105Proof) => {
+        const h = new Headers(init?.headers)
+        h.set("x-bsv-payment", JSON.stringify(proof))
+        h.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
+        return h
+      }
+
       let proof: import("./types").Brc105Proof
       let abort: (() => Promise<void>) | undefined
       try {
-        if (brc105ProofConstructor) {
-          const result = await brc105ProofConstructor(brc105Challenge)
-          proof = result.proof
-          abort = result.abort
-        } else {
-          const result = await constructBrc105Proof(brc105Challenge, brc105Wallet!, origin)
-          proof = result.proof
-          abort = result.abort
-        }
+        const result = await buildProof()
+        proof = result.proof
+        abort = result.abort
       } catch (err) {
         console.error("[x402] Proof construction failed (brc105):", err)
         config.onProofError?.(err, "brc105")
         return response
       }
 
-      const headers = new Headers(init?.headers)
-      headers.set("x-bsv-payment", JSON.stringify(proof))
-      headers.set("x-bsv-auth-identity-key", proof.clientIdentityKey)
-
-      let retryResponse: Response
-      try {
-        retryResponse = await fetch(input, { ...init, headers })
-      } catch (err) {
-        // Network error, timeout, etc. — abort to release locked UTXOs
-        if (abort) {
-          await abort()
-          console.warn('[x402] BRC-105 retry fetch failed, UTXOs released via abortAction')
+      // --- Network retry loop: resend the same signed tx ---
+      let retryResponse: Response | undefined
+      let networkError = false
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          await delay(1000 * 2 ** (attempt - 1))
         }
-        throw err
+        try {
+          retryResponse = await fetch(input, { ...init, headers: proofHeaders(proof) })
+          networkError = false
+          break
+        } catch {
+          networkError = true
+        }
       }
 
-      if (!retryResponse.ok && abort) {
+      // Network error: all retries exhausted — do NOT abort (tx may be on-chain)
+      if (networkError) {
+        throw new Error(
+          "[x402] Payment state unknown: network error after " +
+          `${maxRetries + 1} attempts. The transaction may have been broadcast — ` +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      // Success
+      if (retryResponse!.ok) return retryResponse!
+
+      // --- Server rejection: abort, then single fresh retry ---
+      if (abort) {
         await abort()
         console.warn('[x402] Server rejected BRC-105 payment, UTXOs released via abortAction')
       }
 
-      return retryResponse
+      let freshProof: import("./types").Brc105Proof
+      let freshAbort: (() => Promise<void>) | undefined
+      try {
+        const result = await buildProof()
+        freshProof = result.proof
+        freshAbort = result.abort
+      } catch (err) {
+        console.error("[x402] Fresh proof construction failed (brc105):", err)
+        config.onProofError?.(err, "brc105")
+        return retryResponse!
+      }
+
+      let freshResponse: Response
+      try {
+        freshResponse = await fetch(input, { ...init, headers: proofHeaders(freshProof) })
+      } catch {
+        // Network error on fresh attempt — do NOT abort (tx may be on-chain)
+        throw new Error(
+          "[x402] Payment state unknown: network error on fresh retry. " +
+          "The transaction may have been broadcast — " +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      if (!freshResponse.ok && freshAbort) {
+        await freshAbort()
+        console.warn('[x402] Server rejected fresh BRC-105 payment, UTXOs released via abortAction')
+      }
+
+      return freshResponse
     }
 
     // Neither protocol header present — pass through
@@ -284,6 +337,10 @@ export async function x402Fetch(
 }
 
 // === Helpers ===
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 function resolveRelativeUrl(url: string): string {
   const loc = (globalThis as typeof globalThis & { location?: { href?: string } }).location
