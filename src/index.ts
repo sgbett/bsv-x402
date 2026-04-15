@@ -7,6 +7,7 @@ export { parseChallenge } from "./challenge"
 export { parseBrc105Challenge } from "./brc105-challenge"
 export { constructBrc105Proof } from "./brc105-proof"
 export { parseBrc121Challenge } from "./brc121-challenge"
+export { constructBrc121Proof } from "./brc121-proof"
 
 // Autospend (tier + weapon + health bar)
 export {
