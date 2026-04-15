@@ -781,7 +781,7 @@ describe("createX402Fetch — BRC-105", () => {
     expect(freshAbort).not.toHaveBeenCalled()
   })
 
-  it("propagates original error when abort() throws during server rejection", async () => {
+  it("swallows abort error and still performs fresh retry", async () => {
     const abort = vi.fn().mockRejectedValue(new Error("abort failed"))
     let callCount = 0
     const brc105Proof = vi.fn().mockImplementation(async () => {
@@ -790,7 +790,7 @@ describe("createX402Fetch — BRC-105", () => {
         proof: {
           derivationPrefix: "prefix",
           derivationSuffix: "suffix-" + callCount,
-          transaction: "dHg=",
+          transaction: callCount === 1 ? "b3JpZw==" : "ZnJlc2g=",
           clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
           txid: "txid-" + callCount,
         },
@@ -801,8 +801,13 @@ describe("createX402Fetch — BRC-105", () => {
     globalThis.fetch = vi.fn()
       .mockResolvedValueOnce(makeBrc105Response(1000))
       .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
 
     const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
-    await expect(f("https://api.example.com/data")).rejects.toThrow("abort failed")
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).toHaveBeenCalledOnce()
+    expect(brc105Proof).toHaveBeenCalledTimes(2)
   })
 })

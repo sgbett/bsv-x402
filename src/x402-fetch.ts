@@ -283,8 +283,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
 
       // --- Server rejection: abort, then single fresh retry ---
       if (abort) {
-        await abort()
-        console.warn('[x402] Server rejected BRC-105 payment, UTXOs released via abortAction')
+        try {
+          await abort()
+          console.warn('[x402] Server rejected BRC-105 payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] abortAction failed during server rejection:', err)
+        }
       }
 
       let freshProof: import("./types").Brc105Proof
@@ -312,8 +316,12 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       }
 
       if (!freshResponse.ok && freshAbort) {
-        await freshAbort()
-        console.warn('[x402] Server rejected fresh BRC-105 payment, UTXOs released via abortAction')
+        try {
+          await freshAbort()
+          console.warn('[x402] Server rejected fresh BRC-105 payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] freshAbort failed during double rejection:', err)
+        }
       }
 
       return freshResponse
