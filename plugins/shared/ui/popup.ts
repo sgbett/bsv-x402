@@ -367,18 +367,33 @@ document.addEventListener("DOMContentLoaded", async () => {
       resultEl.textContent = "";
       try {
         const state = await sendMessage({ type: "verifyUtxos" });
-        const invalid = (state as any).invalidOutputs as number;
-        if (invalid > 0) {
-          resultEl.textContent = `Released ${invalid} invalid output${invalid > 1 ? "s" : ""}`;
-          resultEl.style.color = "#f1c40f";
+        const vr = (state as any).verifyResult as
+          | { checked: number; relinquished: number; failed: number }
+          | undefined;
+
+        resultEl.className = "verify-result";
+
+        if (!vr || vr.checked === 0) {
+          resultEl.textContent = "No outputs to verify";
+          resultEl.classList.add("verify-success");
+        } else if (vr.relinquished === 0 && vr.failed === 0) {
+          resultEl.textContent = `Checked ${vr.checked} output${vr.checked !== 1 ? "s" : ""}: all valid`;
+          resultEl.classList.add("verify-success");
         } else {
-          resultEl.textContent = "All outputs verified";
-          resultEl.style.color = "#00d4aa";
+          const parts: string[] = [`Checked ${vr.checked}`];
+          if (vr.relinquished > 0) {
+            parts.push(`released ${vr.relinquished} spent output${vr.relinquished !== 1 ? "s" : ""}`);
+          }
+          if (vr.failed > 0) {
+            parts.push(`${vr.failed} lookup failure${vr.failed !== 1 ? "s" : ""}`);
+          }
+          resultEl.textContent = parts.join(", ");
+          resultEl.classList.add(vr.failed > 0 ? "verify-error" : "verify-warning");
         }
         updateUI(state);
       } catch (err) {
+        resultEl.className = "verify-result verify-error";
         resultEl.textContent = err instanceof Error ? err.message : String(err);
-        resultEl.style.color = "#e74c3c";
       } finally {
         verifyUtxosBtn.disabled = false;
         verifyUtxosBtn.textContent = "Verify UTXOs";

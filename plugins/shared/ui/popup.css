@@ -169,6 +169,12 @@ input:last-child { margin-bottom: 0px; }
   min-height: 0;
 }
 
+/* Verify UTXO result states */
+.verify-result { font-size: 12px; margin-top: 4px; min-height: 0; }
+.verify-result.verify-success { color: #00d4aa; }
+.verify-result.verify-warning { color: #f1c40f; }
+.verify-result.verify-error { color: #e74c3c; }
+
 footer {
   text-align: center;
   padding-top: 8px;
