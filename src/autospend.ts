@@ -117,6 +117,21 @@ export function clampBalanceToTier(
 }
 
 /**
+ * Record a refund — increases the autospend balance by the refund amount,
+ * capped at min(tierCap, walletBalance). Invalid amounts are ignored.
+ */
+export function recordRefund(
+  amount: number,
+  state: AutospendState,
+  config: AutospendConfig,
+  walletBalance: number,
+): AutospendState {
+  if (!isValidAmount(amount)) return state
+  const cap = Math.min(TIER_CAPS[config.tier], walletBalance)
+  return { balance: Math.min(cap, state.balance + amount) }
+}
+
+/**
  * Create a fresh autospend state at the tier cap.
  */
 export function initialState(config: AutospendConfig, walletBalance: number): AutospendState {

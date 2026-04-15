@@ -5,6 +5,7 @@ import {
   PICKUP_PERCENTAGES,
   checkPayment,
   recordPayment,
+  recordRefund,
   applyPickup,
   clampBalanceToTier,
   initialState,
@@ -92,6 +93,62 @@ describe("recordPayment", () => {
     expect(recordPayment(NaN, state)).toEqual({ balance: 1_000_000 })
     expect(recordPayment(Infinity, state)).toEqual({ balance: 1_000_000 })
     expect(recordPayment(0, state)).toEqual({ balance: 1_000_000 })
+  })
+})
+
+describe("recordRefund", () => {
+  const walletBalance = 10_000_000_000
+
+  it("increases balance by the refund amount", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    const result = recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(60_000_000)
+  })
+
+  it("caps refund at tier cap", () => {
+    const state: AutospendState = { balance: 95_000_000 }
+    const result = recordRefund(20_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(100_000_000) // HMP tier cap, not 115M
+  })
+
+  it("caps refund at wallet balance when wallet balance < tier cap", () => {
+    const state: AutospendState = { balance: 40_000_000 }
+    const result = recordRefund(20_000_000, state, HMP, 50_000_000)
+    expect(result.balance).toBe(50_000_000) // wallet balance cap, not 60M
+  })
+
+  it("returns state unchanged for invalid amounts", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    expect(recordRefund(NaN, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(Infinity, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(-100, state, HMP, walletBalance)).toBe(state)
+    expect(recordRefund(0, state, HMP, walletBalance)).toBe(state)
+  })
+
+  it("refund after spend restores balance correctly", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    let state = initialState(config, walletBalance) // 100_000_000
+    state = recordPayment(30_000_000, state) // 70_000_000
+    state = recordRefund(15_000_000, state, config, walletBalance) // 85_000_000
+    expect(state.balance).toBe(85_000_000)
+  })
+
+  it("refund at full balance is a no-op", () => {
+    const state: AutospendState = { balance: 100_000_000 } // at HMP tier cap
+    const result = recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(100_000_000)
+  })
+
+  it("refund after full depletion restores balance to refund amount", () => {
+    const state: AutospendState = { balance: 0 }
+    const result = recordRefund(25_000_000, state, HMP, walletBalance)
+    expect(result.balance).toBe(25_000_000)
+  })
+
+  it("does not mutate the input state", () => {
+    const state: AutospendState = { balance: 50_000_000 }
+    recordRefund(10_000_000, state, HMP, walletBalance)
+    expect(state.balance).toBe(50_000_000)
   })
 })
 
