@@ -17,6 +17,7 @@ export interface VerifyResult {
 export async function verifyUtxos(
   backend: WalletBackend,
   network: WocNetwork,
+  { delayMs = 500, backoffMs = 2000 } = {},
 ): Promise<VerifyResult> {
   const result: VerifyResult = { checked: 0, relinquished: 0, failed: 0 }
 
@@ -27,48 +28,63 @@ export async function verifyUtxos(
   }, 'self') as { totalOutputs: number; outputs: Array<{ outpoint: string; satoshis: number; spendable: boolean }> }
 
   const spendable = outputs.filter((o) => o.spendable)
+  console.log(`[x402] verifyUtxos: ${outputs.length} outputs, ${spendable.length} spendable, network=${network}`)
   if (spendable.length === 0) return result
 
-  // Throttled chain verification — 5 concurrent lookups max
-  const CONCURRENCY = 5
-  let rateLimited = false
+  // Sequential verification with delay — WoC free tier limits to ~3 req/s
 
-  for (let i = 0; i < spendable.length && !rateLimited; i += CONCURRENCY) {
-    const batch = spendable.slice(i, i + CONCURRENCY)
-    const settled = await Promise.allSettled(
-      batch.map(async (output) => {
-        const dotIdx = output.outpoint.lastIndexOf('.')
-        if (dotIdx === -1) throw new Error(`Invalid outpoint format: ${output.outpoint}`)
-        const txid = output.outpoint.slice(0, dotIdx)
-        const vout = parseInt(output.outpoint.slice(dotIdx + 1), 10)
-        if (isNaN(vout)) throw new Error(`Invalid vout in outpoint: ${output.outpoint}`)
+  for (const output of spendable) {
+    const dotIdx = output.outpoint.lastIndexOf('.')
+    if (dotIdx === -1) { result.failed++; continue }
+    const txid = output.outpoint.slice(0, dotIdx)
+    const vout = parseInt(output.outpoint.slice(dotIdx + 1), 10)
+    if (isNaN(vout)) { result.failed++; continue }
 
-        const spent = await checkOutpointSpent(txid, vout, network)
-        return { outpoint: output.outpoint, spent }
-      }),
-    )
-
-    for (const r of settled) {
-      if (r.status === 'fulfilled') {
-        result.checked++
-        if (r.value.spent) {
-          try {
-            await backend.call('relinquishOutput', {
-              basket: 'default',
-              output: r.value.outpoint,
-            }, 'self')
-            result.relinquished++
-          } catch {
-            result.failed++
+    try {
+      const spent = await checkOutpointSpent(txid, vout, network)
+      result.checked++
+      if (spent) {
+        try {
+          await backend.call('relinquishOutput', {
+            basket: 'default',
+            output: output.outpoint,
+          }, 'self')
+          result.relinquished++
+        } catch {
+          result.failed++
+        }
+      }
+    } catch (err) {
+      if (err instanceof WocRateLimitError) {
+        // Back off and retry once after 2s
+        console.warn(`[x402] verifyUtxos: rate-limited, backing off ${backoffMs}ms`)
+        if (backoffMs > 0) await new Promise((r) => setTimeout(r, backoffMs))
+        try {
+          const spent = await checkOutpointSpent(txid, vout, network)
+          result.checked++
+          if (spent) {
+            try {
+              await backend.call('relinquishOutput', {
+                basket: 'default',
+                output: output.outpoint,
+              }, 'self')
+              result.relinquished++
+            } catch {
+              result.failed++
+            }
           }
+        } catch (retryErr) {
+          console.warn(`[x402] verifyUtxos: retry failed, stopping`, retryErr)
+          break
         }
       } else {
-        if (r.reason instanceof WocRateLimitError) {
-          rateLimited = true
-        }
+        console.warn(`[x402] verifyUtxos lookup failed:`, err)
         result.failed++
       }
     }
+
+    // Pace requests to stay within WoC rate limits
+    if (delayMs > 0) await new Promise((r) => setTimeout(r, delayMs))
   }
 
   return result

@@ -178,6 +178,8 @@ interface InternalMessage {
     | 'approvalResponse'
     | 'sendFunds'
     | 'verifyUtxos'
+    | 'adminListOutputs'
+    | 'adminAbortNosend'
   payload?: unknown
 }
 
@@ -319,6 +321,75 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       }
       const x402State = x402.getX402State()
       return { ...walletState, ...x402State, verifyResult }
+    }
+
+    case 'adminListOutputs': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const backend = wallet.getBackend()
+      const params = (message.payload ?? {}) as Record<string, unknown>
+      const outputsResult = await backend.call('listOutputs', params, 'self') as {
+        totalOutputs: number
+        outputs: Array<{ outpoint: string; satoshis: number; spendable: boolean; tags?: string[]; labels?: string[]; customInstructions?: string }>
+      }
+
+      // Fetch all actions to get transaction statuses
+      // listActions requires labels — fetch with common labels, then all
+      const actionsResult = await backend.call('listActions', {
+        labels: [],
+        includeOutputs: true,
+        limit: 10000,
+      }, 'self') as {
+        totalActions: number
+        actions: Array<{ txid: string; status: string; description: string; satoshis: number; isOutgoing: boolean; outputs?: Array<{ outputIndex: number }> }>
+      }
+
+      // Build txid → status map
+      console.log(`[x402] adminListOutputs: ${actionsResult.totalActions} actions, ${actionsResult.actions.length} returned`)
+      if (actionsResult.actions.length > 0) {
+        console.log(`[x402] sample action:`, JSON.stringify(actionsResult.actions[0]))
+      }
+      const txStatusMap = new Map<string, { status: string; description: string; isOutgoing: boolean }>()
+      for (const action of actionsResult.actions) {
+        txStatusMap.set(action.txid, { status: action.status, description: action.description, isOutgoing: action.isOutgoing })
+      }
+
+      // Log unique txids from outputs vs actions for debugging
+      const outputTxids = new Set(outputsResult.outputs.map(o => { const d = o.outpoint.lastIndexOf('.'); return d !== -1 ? o.outpoint.slice(0, d) : o.outpoint }))
+      const actionTxids = new Set(actionsResult.actions.map(a => a.txid))
+      const missing = [...outputTxids].filter(t => !actionTxids.has(t))
+      if (missing.length > 0) console.warn(`[x402] ${missing.length} output txids not found in actions:`, missing)
+
+      // Enrich outputs with parent tx status
+      const enriched = outputsResult.outputs.map((o) => {
+        const dotIdx = o.outpoint.lastIndexOf('.')
+        const txid = dotIdx !== -1 ? o.outpoint.slice(0, dotIdx) : o.outpoint
+        const txInfo = txStatusMap.get(txid)
+        return {
+          ...o,
+          txid,
+          txStatus: txInfo?.status ?? 'unknown',
+          txDescription: txInfo?.description ?? '',
+          txIsOutgoing: txInfo?.isOutgoing ?? false,
+        }
+      })
+
+      return { totalOutputs: outputsResult.totalOutputs, outputs: enriched }
+    }
+
+    case 'adminAbortNosend': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const backend = wallet.getBackend()
+      // specOpNoSendActions + 'abort' label aborts all nosend transactions via wallet-toolbox
+      const SPEC_OP_NOSEND = 'ac6b20a3bb320adafecd637b25c84b792ad828d3aa510d05dc841481f664277d'
+      const result = await backend.call('listActions', {
+        labels: [SPEC_OP_NOSEND, 'abort'],
+        limit: 10000,
+      }, 'self') as { totalActions: number; actions: Array<{ txid: string; status: string }> }
+      console.log(`[x402] adminAbortNosend: aborted ${result.totalActions} nosend transactions`)
+      // Refresh balance
+      chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
+      const walletState = await wallet.getWalletState()
+      return { aborted: result.totalActions, balance: walletState.balance }
     }
 
     default:

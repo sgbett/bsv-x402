@@ -22,6 +22,9 @@ const TX1 = 'aabb'.repeat(16)
 const TX2 = 'ccdd'.repeat(16)
 const TX3 = 'eeff'.repeat(16)
 
+/** Skip inter-request delay in tests */
+const opts = { delayMs: 0, backoffMs: 0 }
+
 describe('verifyUtxos', () => {
   let backend: WalletBackend
   let callSpy: ReturnType<typeof vi.fn>
@@ -39,7 +42,7 @@ describe('verifyUtxos', () => {
   it('returns zeroes when no outputs exist', async () => {
     callSpy.mockResolvedValueOnce({ totalOutputs: 0, outputs: [] })
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 0, relinquished: 0, failed: 0 })
     expect(checkOutpointSpent).not.toHaveBeenCalled()
@@ -51,7 +54,7 @@ describe('verifyUtxos', () => {
       outputs: [{ outpoint: `${TX1}.0`, satoshis: 1000, spendable: false }],
     })
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 0, relinquished: 0, failed: 0 })
     expect(checkOutpointSpent).not.toHaveBeenCalled()
@@ -64,7 +67,7 @@ describe('verifyUtxos', () => {
     })
     checkOutpointSpent.mockResolvedValue(false)
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 2, relinquished: 0, failed: 0 })
     expect(checkOutpointSpent).toHaveBeenCalledTimes(2)
@@ -84,7 +87,7 @@ describe('verifyUtxos', () => {
       .mockResolvedValueOnce(true)  // TX1.0 spent
       .mockResolvedValueOnce(false) // TX2.1 unspent
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 2, relinquished: 1, failed: 0 })
     expect(callSpy).toHaveBeenCalledWith('relinquishOutput', {
@@ -104,7 +107,7 @@ describe('verifyUtxos', () => {
 
     checkOutpointSpent.mockResolvedValue(true) // both spent
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 2, relinquished: 1, failed: 1 })
   })
@@ -116,34 +119,45 @@ describe('verifyUtxos', () => {
     })
     checkOutpointSpent.mockRejectedValueOnce(new Error('network error'))
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 0, relinquished: 0, failed: 1 })
     // Should NOT have called relinquishOutput
     expect(callSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('stops on rate limit (429) and returns partial results', async () => {
-    // 7 outputs — should be 2 batches of 5+2, but rate limit hits in first batch
-    const outputs = Array.from({ length: 7 }, (_, i) => makeOutput(TX1, i))
-    callSpy.mockResolvedValueOnce({ totalOutputs: 7, outputs })
+  it('retries once on rate limit then continues', async () => {
+    const outputs = Array.from({ length: 3 }, (_, i) => makeOutput(TX1, i))
+    callSpy.mockResolvedValueOnce({ totalOutputs: 3, outputs })
 
     checkOutpointSpent
       .mockResolvedValueOnce(false) // output 0: unspent
-      .mockResolvedValueOnce(false) // output 1: unspent
-      .mockRejectedValueOnce(new checkModule.WocRateLimitError())
-      .mockResolvedValueOnce(false) // output 3: unspent
-      .mockResolvedValueOnce(false) // output 4: unspent
+      .mockRejectedValueOnce(new checkModule.WocRateLimitError()) // output 1: rate-limited
+      .mockResolvedValueOnce(false) // output 1 retry: unspent
+      .mockResolvedValueOnce(false) // output 2: unspent
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
-    // First batch of 5: 4 checked + 1 failed (rate limited)
-    // Second batch of 2: skipped due to rateLimited flag
-    expect(result.checked).toBe(4)
-    expect(result.failed).toBe(1)
-    expect(result.relinquished).toBe(0)
-    // Should not have processed the second batch
-    expect(checkOutpointSpent).toHaveBeenCalledTimes(5)
+    expect(result.checked).toBe(3)
+    expect(result.failed).toBe(0)
+    expect(checkOutpointSpent).toHaveBeenCalledTimes(4) // 3 outputs + 1 retry
+  })
+
+  it('stops after retry also hits rate limit', async () => {
+    const outputs = Array.from({ length: 5 }, (_, i) => makeOutput(TX1, i))
+    callSpy.mockResolvedValueOnce({ totalOutputs: 5, outputs })
+
+    checkOutpointSpent
+      .mockResolvedValueOnce(false) // output 0: unspent
+      .mockRejectedValueOnce(new checkModule.WocRateLimitError()) // output 1: rate-limited
+      .mockRejectedValueOnce(new checkModule.WocRateLimitError()) // output 1 retry: still limited
+
+    const result = await verifyUtxos(backend, 'main', opts)
+
+    // Checked output 0, then rate-limited twice on output 1 — stops
+    expect(result.checked).toBe(1)
+    expect(result.failed).toBe(0)
+    expect(checkOutpointSpent).toHaveBeenCalledTimes(3)
   })
 
   it('passes correct network to checkOutpointSpent', async () => {
@@ -153,7 +167,7 @@ describe('verifyUtxos', () => {
     })
     checkOutpointSpent.mockResolvedValueOnce(false)
 
-    await verifyUtxos(backend, 'test')
+    await verifyUtxos(backend, 'test', opts)
 
     expect(checkOutpointSpent).toHaveBeenCalledWith(TX1, 3, 'test')
   })
@@ -165,7 +179,7 @@ describe('verifyUtxos', () => {
     })
     checkOutpointSpent.mockResolvedValueOnce(false)
 
-    await verifyUtxos(backend, 'main')
+    await verifyUtxos(backend, 'main', opts)
 
     expect(checkOutpointSpent).toHaveBeenCalledWith(TX3, 42, 'main')
   })
@@ -183,7 +197,7 @@ describe('verifyUtxos', () => {
       .mockResolvedValueOnce(false)  // TX2 unspent
       .mockRejectedValueOnce(new Error('timeout')) // TX3 lookup failed
 
-    const result = await verifyUtxos(backend, 'main')
+    const result = await verifyUtxos(backend, 'main', opts)
 
     expect(result).toEqual({ checked: 2, relinquished: 1, failed: 1 })
     // Only TX1 should be relinquished — TX3's lookup failed, so no relinquish
@@ -196,7 +210,7 @@ describe('verifyUtxos', () => {
   it('calls listOutputs with correct parameters', async () => {
     callSpy.mockResolvedValueOnce({ totalOutputs: 0, outputs: [] })
 
-    await verifyUtxos(backend, 'main')
+    await verifyUtxos(backend, 'main', opts)
 
     expect(callSpy).toHaveBeenCalledWith('listOutputs', {
       basket: 'default',

@@ -401,6 +401,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
+  // Wallet: UTXO Admin — open in a tab
+  const utxoAdminBtn = document.getElementById("utxo-admin-btn") as HTMLButtonElement | null;
+  if (utxoAdminBtn) {
+    utxoAdminBtn.addEventListener("click", () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL("ui/admin/utxos.html") });
+    });
+  }
+
   // Wallet: Send funds
   const sendBtn = document.getElementById("send-btn") as HTMLButtonElement | null;
   if (sendBtn) {
