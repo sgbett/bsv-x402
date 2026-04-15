@@ -98,6 +98,8 @@ export interface X402Config {
   brc105ProofConstructor?: Brc105ProofConstructor
   brc105Wallet?: Brc105Wallet
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
+  /** Maximum number of retries for network errors during BRC-105 payment (default: 2). */
+  maxRetries?: number
 }
 
 // === BRC-100 CWI interface types ===
