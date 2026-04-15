@@ -352,4 +352,31 @@ describe("constructBrc105Proof", () => {
       "HMAC generation failed",
     )
   })
+
+  it("returns broadcast callback that calls wallet.createAction with sendWith", async () => {
+    const wallet = mockWallet()
+    const { proof, broadcast } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(broadcast).toBeDefined()
+    await broadcast!()
+    // createAction is called once for the payment, once for broadcast
+    const calls = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[1][0]).toEqual({
+      description: 'Broadcast x402 payment',
+      outputs: [],
+      options: { sendWith: [proof.txid] },
+    })
+  })
+
+  it("broadcast callback swallows errors from wallet.createAction", async () => {
+    const createAction = vi.fn()
+      .mockResolvedValueOnce({ txid: "aabbccdd", rawTx: "0100000001000000000000000000" })
+      .mockRejectedValueOnce(new Error("broadcast failed"))
+    const wallet = mockWallet({ createAction })
+    const { broadcast } = await constructBrc105Proof(CHALLENGE, wallet)
+
+    expect(broadcast).toBeDefined()
+    await expect(broadcast!()).resolves.toBeUndefined()
+  })
 })

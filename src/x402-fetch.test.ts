@@ -810,6 +810,143 @@ describe("createX402Fetch — BRC-105", () => {
     expect(abort).toHaveBeenCalledOnce()
     expect(brc105Proof).toHaveBeenCalledTimes(2)
   })
+
+  it("calls broadcast on server 200 acceptance", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      abort: vi.fn(),
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("does not call broadcast on server 4xx rejection", async () => {
+    const broadcast = vi.fn()
+    const abort = vi.fn()
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: "dHg=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort,
+        broadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Bad Request", { status: 400 }))
+      .mockResolvedValueOnce(new Response("Bad Request Again", { status: 400 }))
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(400)
+    expect(broadcast).not.toHaveBeenCalled()
+    expect(abort).toHaveBeenCalled()
+  })
+
+  it("returns response even when broadcast throws", async () => {
+    const broadcast = vi.fn().mockRejectedValue(new Error("ARC unavailable"))
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("handles undefined broadcast gracefully (custom constructor)", async () => {
+    const brc105Proof = vi.fn().mockResolvedValue({
+      proof: {
+        derivationPrefix: "prefix",
+        derivationSuffix: "suffix",
+        transaction: "dHg=",
+        clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        txid: "abc123",
+      },
+      // no broadcast
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+  })
+
+  it("calls fresh broadcast on server rejection then fresh retry success", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const freshBroadcast = vi.fn().mockResolvedValue(undefined)
+    let callCount = 0
+    const brc105Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          derivationPrefix: "prefix",
+          derivationSuffix: "suffix-" + callCount,
+          transaction: callCount === 1 ? "b3JpZw==" : "ZnJlc2g=",
+          clientIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          txid: "txid-" + callCount,
+        },
+        abort: vi.fn(),
+        broadcast: callCount === 1 ? broadcast : freshBroadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc105Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc105ProofConstructor: brc105Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    // Original broadcast NOT called (server rejected original proof)
+    expect(broadcast).not.toHaveBeenCalled()
+    // Fresh broadcast called on success
+    expect(freshBroadcast).toHaveBeenCalledOnce()
+  })
 })
 
 // === BEEF acknowledgement tests ===
@@ -1613,5 +1750,147 @@ describe("createX402Fetch — BRC-121", () => {
     expect(headerNames).toContain("x-bsv-nonce")
     expect(headerNames).toContain("x-bsv-time")
     expect(headerNames).toContain("x-bsv-vout")
+  })
+
+  it("calls broadcast on server 200 acceptance", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-broadcast-txid",
+      },
+      abort: vi.fn(),
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("does not call broadcast on server 4xx rejection", async () => {
+    const broadcast = vi.fn()
+    const abort = vi.fn()
+    let callCount = 0
+    const brc121Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          beef: btoa("test-beef"),
+          senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          nonce: btoa("12345678"),
+          time: "1719500000000",
+          vout: "0",
+          txid: "txid-" + callCount,
+        },
+        abort,
+        broadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(new Response("Bad Request", { status: 400 }))
+      .mockResolvedValueOnce(new Response("Bad Request Again", { status: 400 }))
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(400)
+    expect(broadcast).not.toHaveBeenCalled()
+    expect(abort).toHaveBeenCalled()
+  })
+
+  it("returns response even when broadcast throws", async () => {
+    const broadcast = vi.fn().mockRejectedValue(new Error("ARC unavailable"))
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-err-txid",
+      },
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("handles undefined broadcast gracefully (custom constructor)", async () => {
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-nobc-txid",
+      },
+      // no broadcast
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+  })
+
+  it("calls fresh broadcast on server rejection then fresh retry success", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const freshBroadcast = vi.fn().mockResolvedValue(undefined)
+    let callCount = 0
+    const brc121Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          beef: callCount === 1 ? btoa("original-beef") : btoa("fresh-beef"),
+          senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          nonce: btoa("12345678"),
+          time: "1719500000000",
+          vout: "0",
+          txid: callCount === 1 ? "original-txid" : "fresh-txid",
+        },
+        abort: vi.fn(),
+        broadcast: callCount === 1 ? broadcast : freshBroadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    // Original broadcast NOT called (server rejected original proof)
+    expect(broadcast).not.toHaveBeenCalled()
+    // Fresh broadcast called on success
+    expect(freshBroadcast).toHaveBeenCalledOnce()
   })
 })

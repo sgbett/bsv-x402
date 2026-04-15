@@ -215,4 +215,31 @@ describe("constructBrc121Proof", () => {
     const params = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(params.description).toBe("BRC-121 payment")
   })
+
+  it("returns broadcast callback that calls wallet.createAction with sendWith", async () => {
+    const wallet = mockWallet()
+    const { proof, broadcast } = await constructBrc121Proof(CHALLENGE, wallet)
+
+    expect(broadcast).toBeDefined()
+    await broadcast!()
+    // createAction is called once for the payment, once for broadcast
+    const calls = (wallet.createAction as ReturnType<typeof vi.fn>).mock.calls
+    expect(calls).toHaveLength(2)
+    expect(calls[1][0]).toEqual({
+      description: 'Broadcast x402 payment',
+      outputs: [],
+      options: { sendWith: [proof.txid] },
+    })
+  })
+
+  it("broadcast callback swallows errors from wallet.createAction", async () => {
+    const createAction = vi.fn()
+      .mockResolvedValueOnce({ txid: "abc123def456", tx: Array.from({ length: 20 }, (_, i) => i) })
+      .mockRejectedValueOnce(new Error("broadcast failed"))
+    const wallet = mockWallet({ createAction })
+    const { broadcast } = await constructBrc121Proof(CHALLENGE, wallet)
+
+    expect(broadcast).toBeDefined()
+    await expect(broadcast!()).resolves.toBeUndefined()
+  })
 })

@@ -46,6 +46,7 @@ export interface Brc105Proof {
 export interface Brc105ProofResult {
   proof: Brc105Proof
   abort?: () => Promise<void>
+  broadcast?: () => Promise<void>
 }
 
 export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105ProofResult>
@@ -72,6 +73,7 @@ export interface Brc121Proof {
 export interface Brc121ProofResult {
   proof: Brc121Proof
   abort?: () => Promise<void>
+  broadcast?: () => Promise<void>
 }
 
 /** Custom BRC-121 proof constructor. */
@@ -185,6 +187,7 @@ export interface CWICreateActionParams {
     returnTXIDOnly?: boolean
     noSend?: boolean
     randomizeOutputs?: boolean
+    sendWith?: string[]
   }
 }
 
