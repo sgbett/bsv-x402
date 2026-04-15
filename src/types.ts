@@ -91,6 +91,36 @@ export interface AutospendState {
   balance: number
 }
 
+// === BEEF acknowledgement ===
+
+/** Shape of each entry in the server's `pendingBeefs` response array. */
+export interface PendingBeef {
+  txid: string
+  beef: string              // base64-encoded AtomicBEEF
+  derivationPrefix: string
+  derivationSuffix: string
+  senderIdentityKey: string // server's identity key for paymentRemittance
+  outputIndex: number
+}
+
+/** Narrow wallet interface for BEEF acknowledgement (subset of CWIInterface). */
+export interface AckWallet {
+  internalizeAction(params: {
+    tx: number[]
+    outputs: Array<{
+      outputIndex: number
+      protocol: 'wallet payment'
+      paymentRemittance: {
+        derivationPrefix: string
+        derivationSuffix: string
+        senderIdentityKey: string
+      }
+    }>
+    description: string
+    labels?: string[]
+  }): Promise<{ accepted: boolean }>
+}
+
 // === Factory config ===
 
 export interface X402Config {
@@ -100,6 +130,10 @@ export interface X402Config {
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
   /** Maximum number of retries for network errors during BRC-105 payment (default: 2). */
   maxRetries?: number
+  /** Wallet for internalising received BEEFs and enabling ack headers. */
+  ackWallet?: AckWallet
+  /** Server identity key for paymentRemittance.senderIdentityKey (fallback when not per-entry). */
+  serverIdentityKey?: string
 }
 
 // === BRC-100 CWI interface types ===

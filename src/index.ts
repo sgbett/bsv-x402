@@ -22,6 +22,7 @@ export type { PaymentDecision } from "./autospend"
 
 // Types
 export type {
+  AckWallet,
   AutospendConfig,
   AutospendState,
   Brc105Challenge,
@@ -34,6 +35,7 @@ export type {
   CWICreateActionResult,
   PaymentProtocol,
   PaymentRequest,
+  PendingBeef,
   PickupName,
   Proof,
   TierName,
