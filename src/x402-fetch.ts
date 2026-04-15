@@ -1,8 +1,11 @@
 import { parseBrc105Challenge } from "./brc105-challenge"
 import { constructBrc105Proof } from "./brc105-proof"
+import { parseBrc121Challenge } from "./brc121-challenge"
+import { constructBrc121Proof } from "./brc121-proof"
 import { parseChallenge } from "./challenge"
 import type {
   Brc105Challenge,
+  Brc121Challenge,
   Challenge,
   Proof,
   X402Config,
@@ -174,6 +177,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const constructProof = config.proofConstructor ?? defaultConstructProof
   const brc105ProofConstructor = config.brc105ProofConstructor
   const brc105Wallet = config.brc105Wallet
+  const brc121ProofConstructor = config.brc121ProofConstructor
+  const brc121Wallet = config.brc121Wallet
   const maxRetries = config.maxRetries ?? 2
   const ackWallet = config.ackWallet
   const serverIdentityKey = config.serverIdentityKey
@@ -394,6 +399,132 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         try {
           await freshAbort()
           console.warn('[x402] Server rejected fresh BRC-105 payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] freshAbort failed during double rejection:', err)
+        }
+      }
+
+      await processPendingBeefs(freshResponse)
+      return freshResponse
+    }
+
+    // BRC-121 protocol: x-bsv-sats + x-bsv-server (no x-bsv-payment-version)
+    let brc121Challenge: Brc121Challenge | null
+    try {
+      brc121Challenge = parseBrc121Challenge(response)
+    } catch {
+      // Malformed challenge — treat as non-payable
+      return response
+    }
+
+    if (brc121Challenge) {
+      // No BRC-121 wallet or proof constructor configured — pass through silently
+      if (!brc121ProofConstructor && !brc121Wallet) {
+        await processPendingBeefs(response)
+        return response
+      }
+
+      // Helper: build proof using whichever constructor is configured
+      const buildProof = async () => {
+        if (brc121ProofConstructor) {
+          return brc121ProofConstructor(brc121Challenge!)
+        }
+        return constructBrc121Proof(brc121Challenge!, brc121Wallet!, origin)
+      }
+
+      // Helper: build headers from a proof
+      const proofHeaders = (proof: import("./types").Brc121Proof) => {
+        const h = new Headers(init?.headers)
+        h.set("x-bsv-beef", proof.beef)
+        h.set("x-bsv-sender", proof.senderIdentityKey)
+        h.set("x-bsv-nonce", proof.nonce)
+        h.set("x-bsv-time", proof.time)
+        h.set("x-bsv-vout", proof.vout)
+        injectAckHeader(h)
+        return h
+      }
+
+      let proof: import("./types").Brc121Proof
+      let abort: (() => Promise<void>) | undefined
+      try {
+        const result = await buildProof()
+        proof = result.proof
+        abort = result.abort
+      } catch (err) {
+        console.error("[x402] Proof construction failed (brc121):", err)
+        config.onProofError?.(err, "brc121")
+        return response
+      }
+
+      // --- Network retry loop: resend the same signed tx ---
+      let retryResponse: Response | undefined
+      let networkError = false
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          await delay(1000 * 2 ** (attempt - 1))
+        }
+        try {
+          retryResponse = await fetch(input, { ...init, headers: proofHeaders(proof) })
+          networkError = false
+          break
+        } catch {
+          networkError = true
+        }
+      }
+
+      // Network error: all retries exhausted — do NOT abort (tx may be on-chain)
+      if (networkError) {
+        throw new Error(
+          "[x402] Payment state unknown: network error after " +
+          `${maxRetries + 1} attempts. The transaction may have been broadcast — ` +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      // Success
+      if (retryResponse!.ok) {
+        await processPendingBeefs(retryResponse!)
+        return retryResponse!
+      }
+
+      // --- Server rejection: abort, then single fresh retry ---
+      if (abort) {
+        try {
+          await abort()
+          console.warn('[x402] Server rejected BRC-121 payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] abortAction failed during server rejection:', err)
+        }
+      }
+
+      let freshProof: import("./types").Brc121Proof
+      let freshAbort: (() => Promise<void>) | undefined
+      try {
+        const result = await buildProof()
+        freshProof = result.proof
+        freshAbort = result.abort
+      } catch (err) {
+        console.error("[x402] Fresh proof construction failed (brc121):", err)
+        config.onProofError?.(err, "brc121")
+        return retryResponse!
+      }
+
+      let freshResponse: Response
+      try {
+        freshResponse = await fetch(input, { ...init, headers: proofHeaders(freshProof) })
+      } catch {
+        // Network error on fresh attempt — do NOT abort (tx may be on-chain)
+        throw new Error(
+          "[x402] Payment state unknown: network error on fresh retry. " +
+          "The transaction may have been broadcast — " +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      if (!freshResponse.ok && freshAbort) {
+        try {
+          await freshAbort()
+          console.warn('[x402] Server rejected fresh BRC-121 payment, UTXOs released via abortAction')
         } catch (err) {
           console.warn('[x402] freshAbort failed during double rejection:', err)
         }

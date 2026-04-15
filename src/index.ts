@@ -6,6 +6,8 @@ export type { X402FetchFn } from "./x402-fetch"
 export { parseChallenge } from "./challenge"
 export { parseBrc105Challenge } from "./brc105-challenge"
 export { constructBrc105Proof } from "./brc105-proof"
+export { parseBrc121Challenge } from "./brc121-challenge"
+export { constructBrc121Proof } from "./brc121-proof"
 
 // Autospend (tier + weapon + health bar)
 export {
@@ -29,6 +31,10 @@ export type {
   Brc105Proof,
   Brc105ProofConstructor,
   Brc105Wallet,
+  Brc121Challenge,
+  Brc121Proof,
+  Brc121ProofConstructor,
+  Brc121ProofResult,
   Challenge,
   CWICreateActionOutput,
   CWICreateActionParams,

@@ -50,9 +50,36 @@ export interface Brc105ProofResult {
 
 export type Brc105ProofConstructor = (challenge: Brc105Challenge) => Promise<Brc105ProofResult>
 
+// === BRC-121 Simple 402 types ===
+
+/** BRC-121 challenge parsed from 402 response headers. */
+export interface Brc121Challenge {
+  satoshis: number
+  serverIdentityKey: string
+}
+
+/** BRC-121 proof — maps to 5 individual HTTP headers. */
+export interface Brc121Proof {
+  beef: string               // base64-encoded BEEF (x-bsv-beef)
+  senderIdentityKey: string  // client identity key hex (x-bsv-sender)
+  nonce: string              // base64-encoded derivation prefix (x-bsv-nonce)
+  time: string               // Unix ms timestamp decimal string (x-bsv-time)
+  vout: string               // output index decimal string (x-bsv-vout)
+  txid: string               // for abort tracking (not sent as header)
+}
+
+/** Result from BRC-121 proof construction, with optional abort. */
+export interface Brc121ProofResult {
+  proof: Brc121Proof
+  abort?: () => Promise<void>
+}
+
+/** Custom BRC-121 proof constructor. */
+export type Brc121ProofConstructor = (challenge: Brc121Challenge) => Promise<Brc121ProofResult>
+
 // === Protocol-agnostic payment request ===
 
-export type PaymentProtocol = 'x402' | 'brc105'
+export type PaymentProtocol = 'x402' | 'brc105' | 'brc121'
 
 export interface PaymentRequest {
   amount: number
@@ -127,6 +154,10 @@ export interface X402Config {
   proofConstructor?: (challenge: Challenge) => Promise<Proof>
   brc105ProofConstructor?: Brc105ProofConstructor
   brc105Wallet?: Brc105Wallet
+  /** Custom BRC-121 proof constructor. */
+  brc121ProofConstructor?: Brc121ProofConstructor
+  /** Wallet for BRC-121 payments (reuses Brc105Wallet interface). */
+  brc121Wallet?: Brc105Wallet
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
   /** Maximum number of retries for network errors during BRC-105 payment (default: 2). */
   maxRetries?: number

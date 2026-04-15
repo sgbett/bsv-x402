@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createX402Fetch, payeeAddressToLockingScript, verifyBase58Checksum } from "./x402-fetch"
-import type { Brc105Challenge, Brc105ProofResult } from "./types"
+import type { Brc105Challenge, Brc105ProofResult, Brc121Challenge, Brc121ProofResult } from "./types"
 
 function make402Response(amount: number = 1000) {
   return new Response("Payment Required", {
@@ -1266,5 +1266,352 @@ describe("createX402Fetch — BEEF acknowledgement", () => {
 
     const params = ackWallet.internalizeAction.mock.calls[0][0]
     expect(params.outputs[0].outputIndex).toBe(3)
+  })
+})
+
+// === BRC-121 tests ===
+
+function makeBrc121Response(satoshis: number = 1000, overrides: Record<string, string> = {}) {
+  return new Response("Payment Required", {
+    status: 402,
+    headers: {
+      "x-bsv-sats": String(satoshis),
+      "x-bsv-server": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      ...overrides,
+    },
+  })
+}
+
+function mockBrc121ProofConstructor(): (challenge: Brc121Challenge) => Promise<Brc121ProofResult> {
+  return vi.fn(async () => ({
+    proof: {
+      beef: btoa("test-beef"),
+      senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      nonce: btoa("12345678"),
+      time: "1719500000000",
+      vout: "0",
+      txid: "brc121-test-txid",
+    },
+    abort: vi.fn(),
+  }))
+}
+
+describe("createX402Fetch — BRC-121", () => {
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it("detects BRC-121 402 and retries with 5 proof headers", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const proofConstructor = mockBrc121ProofConstructor()
+    const f = createX402Fetch({ brc121ProofConstructor: proofConstructor })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+    expect(proofConstructor).toHaveBeenCalledOnce()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("x-bsv-beef")).toBe(btoa("test-beef"))
+    expect(retryHeaders.get("x-bsv-sender")).toBe("0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+    expect(retryHeaders.get("x-bsv-nonce")).toBe(btoa("12345678"))
+    expect(retryHeaders.get("x-bsv-time")).toBe("1719500000000")
+    expect(retryHeaders.get("x-bsv-vout")).toBe("0")
+  })
+
+  it("passes through BRC-121 402 when no wallet or proof constructor configured", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc121Response(1000))
+    const f = createX402Fetch()
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+  })
+
+  it("returns original 402 when proof construction fails", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makeBrc121Response(1000))
+
+    const onProofError = vi.fn()
+    const f = createX402Fetch({
+      brc121ProofConstructor: vi.fn().mockRejectedValue(new Error("Wallet declined")),
+      onProofError,
+    })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(onProofError).toHaveBeenCalledOnce()
+    expect(onProofError).toHaveBeenCalledWith(expect.any(Error), "brc121")
+  })
+
+  it("BRC-105 takes priority over BRC-121 when both headers present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "x-bsv-payment-version": "1.0",
+        "x-bsv-payment-satoshis-required": "1000",
+        "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "x-bsv-payment-derivation-prefix": "prefix",
+        "x-bsv-sats": "1000",
+        "x-bsv-server": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const brc105Proof = mockBrc105ProofConstructor()
+    const brc121Proof = mockBrc121ProofConstructor()
+
+    const f = createX402Fetch({
+      brc105ProofConstructor: brc105Proof,
+      brc121ProofConstructor: brc121Proof,
+    })
+
+    await f("https://api.example.com/data")
+
+    expect(brc105Proof).toHaveBeenCalledOnce()
+    expect(brc121Proof).not.toHaveBeenCalled()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("x-bsv-payment")).toBeTruthy()
+    expect(retryHeaders.get("x-bsv-beef")).toBeNull()
+  })
+
+  it("X402 takes priority over BRC-121 when both headers present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "X402-Challenge": JSON.stringify({
+          nonce: "test-nonce",
+          payee: "1TestAddr",
+          amount: 1000,
+          network: "mainnet",
+        }),
+        "x-bsv-sats": "1000",
+        "x-bsv-server": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const customProof = vi.fn().mockResolvedValue({ txid: "custom-txid", beef: btoa("mock-tx") })
+    const brc121Proof = mockBrc121ProofConstructor()
+
+    const f = createX402Fetch({
+      proofConstructor: customProof,
+      brc121ProofConstructor: brc121Proof,
+    })
+
+    await f("https://api.example.com/data")
+
+    expect(customProof).toHaveBeenCalledOnce()
+    expect(brc121Proof).not.toHaveBeenCalled()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("X402-Proof")).toBeTruthy()
+    expect(retryHeaders.get("x-bsv-beef")).toBeNull()
+  })
+
+  it("does not call abort when server returns 200", async () => {
+    const abort = vi.fn()
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-ok-txid",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it("calls abort and retries with fresh proof when server returns 500", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const brc121Proof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          beef: callCount === 1 ? btoa("original-beef") : btoa("fresh-beef"),
+          senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+          nonce: btoa("12345678"),
+          time: "1719500000000",
+          vout: "0",
+          txid: callCount === 1 ? "original-txid" : "fresh-txid",
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).toHaveBeenCalledOnce()
+    expect(freshAbort).not.toHaveBeenCalled()
+    expect(brc121Proof).toHaveBeenCalledTimes(2)
+  })
+
+  it("retries same proof on network error then succeeds on 200", async () => {
+    const abort = vi.fn()
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-retry-txid",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof, maxRetries: 1 })
+
+    vi.useFakeTimers()
+    const promise = f("https://api.example.com/data")
+    await vi.advanceTimersByTimeAsync(1000)
+    const res = await promise
+    vi.useRealTimers()
+
+    expect(res.status).toBe(200)
+    expect(abort).not.toHaveBeenCalled()
+    expect(brc121Proof).toHaveBeenCalledOnce()
+
+    // Same proof headers reused on both attempts
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const firstRetryBeef = (fetchMock.mock.calls[1][1]?.headers as Headers).get("x-bsv-beef")
+    const secondRetryBeef = (fetchMock.mock.calls[2][1]?.headers as Headers).get("x-bsv-beef")
+    expect(firstRetryBeef).toBe(secondRetryBeef)
+  })
+
+  it("throws 'payment state unknown' when all network retries exhausted", async () => {
+    const abort = vi.fn()
+    const brc121Proof = vi.fn().mockResolvedValue({
+      proof: {
+        beef: btoa("test-beef"),
+        senderIdentityKey: "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        nonce: btoa("12345678"),
+        time: "1719500000000",
+        vout: "0",
+        txid: "brc121-fail-txid",
+      },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockRejectedValue(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof, maxRetries: 0 })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Payment state unknown")
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it("processes pendingBeefs on successful BRC-121 response", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    const brc121Proof = mockBrc121ProofConstructor()
+
+    // 402 → proof → 200 with pendingBeefs
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(500))
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: "brc121-ack" })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey, brc121ProofConstructor: brc121Proof })
+
+    const res1 = await f("https://api.example.com/paid")
+    expect(res1.status).toBe(200)
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+
+    // Second call: should carry x-bsv-ack
+    await f("https://api.example.com/next")
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const nextHeaders = fetchMock.mock.calls[2][1]?.headers as Headers
+    expect(nextHeaders.get("x-bsv-ack")).toBe("brc121-ack")
+  })
+
+  it("injects ack headers on BRC-121 retry requests", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    const brc121Proof = mockBrc121ProofConstructor()
+
+    // First call: 200 with pendingBeefs (primes the ack)
+    // Second call: 402 BRC-121 → retry should carry ack header
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: "pre-ack" })]))
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey, brc121ProofConstructor: brc121Proof })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    // The second fetch (index 1) is the initial 402 — the third (index 2) is the retry
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    // The initial request of the second call should have carried the ack from first response
+    const secondInitialHeaders = fetchMock.mock.calls[1][1]?.headers as Headers
+    expect(secondInitialHeaders.get("x-bsv-ack")).toBe("pre-ack")
+  })
+
+  it("uses exact header names matching @bsv/402-pay format", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makeBrc121Response(1000))
+      .mockResolvedValueOnce(make200Response())
+
+    const brc121Proof = mockBrc121ProofConstructor()
+    const f = createX402Fetch({ brc121ProofConstructor: brc121Proof })
+
+    await f("https://api.example.com/data")
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+
+    // Verify exact header names (lowercase x-bsv-* per convention)
+    const headerNames = [...(retryHeaders as any).entries()].map(([k]: [string, string]) => k)
+    expect(headerNames).toContain("x-bsv-beef")
+    expect(headerNames).toContain("x-bsv-sender")
+    expect(headerNames).toContain("x-bsv-nonce")
+    expect(headerNames).toContain("x-bsv-time")
+    expect(headerNames).toContain("x-bsv-vout")
   })
 })
