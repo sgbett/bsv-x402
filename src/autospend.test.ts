@@ -236,3 +236,51 @@ describe("initialState", () => {
     expect(state.balance).toBe(50_000_000)
   })
 })
+
+describe("spend/refund cycle integration", () => {
+  it("spend then partial refund yields correct net spend", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(50_000, state) // 99_950_000
+    expect(state.balance).toBe(99_950_000)
+
+    state = recordRefund(30_000, state, config, walletBalance) // 99_980_000
+    expect(state.balance).toBe(99_980_000)
+  })
+
+  it("refund exceeding original spend is capped at tier cap", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(50_000, state) // 99_950_000
+    state = recordRefund(100_000, state, config, walletBalance) // capped at 100_000_000
+    expect(state.balance).toBe(100_000_000)
+  })
+
+  it("multiple spend/refund cycles yield correct net balance", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 10_000_000_000
+    let state = initialState(config, walletBalance) // 100_000_000
+
+    state = recordPayment(10_000, state)   // 99_990_000
+    state = recordPayment(20_000, state)   // 99_970_000
+    state = recordRefund(15_000, state, config, walletBalance) // 99_985_000
+    state = recordPayment(5_000, state)    // 99_980_000
+    state = recordRefund(10_000, state, config, walletBalance) // 99_990_000
+    // net: -10k -20k +15k -5k +10k = -10k
+    expect(state.balance).toBe(99_990_000)
+  })
+
+  it("wallet balance constrains refund during cycle", () => {
+    const config: AutospendConfig = { tier: "Hurt Me Plenty", weapon: "Pistol" }
+    const walletBalance = 50_000_000 // below tier cap of 100M
+    let state = initialState(config, walletBalance) // 50_000_000
+
+    state = recordPayment(10_000, state) // 49_990_000
+    state = recordRefund(20_000, state, config, walletBalance) // capped at 50_000_000
+    expect(state.balance).toBe(50_000_000)
+  })
+})
