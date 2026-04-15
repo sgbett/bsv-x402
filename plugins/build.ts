@@ -56,6 +56,7 @@ function buildTarget(target: Target) {
     { src: join(SHARED, 'ui', 'popup.ts'), outDir: join(outDir, 'ui') },
     { src: join(SHARED, 'ui', 'wallet', 'setup.ts'), outDir: join(outDir, 'ui', 'wallet') },
     { src: join(SHARED, 'ui', 'x402', 'approve.ts'), outDir: join(outDir, 'ui', 'x402') },
+    { src: join(SHARED, 'ui', 'admin', 'utxos.ts'), outDir: join(outDir, 'ui', 'admin') },
   ]
   for (const { src, outDir: scriptOutDir } of uiScripts) {
     if (existsSync(src)) {
@@ -73,6 +74,7 @@ function buildTarget(target: Target) {
     { src: join(SHARED, 'ui', 'popup.css'), dest: join(outDir, 'ui', 'popup.css') },
     { src: join(SHARED, 'ui', 'wallet', 'setup.html'), dest: join(outDir, 'ui', 'wallet', 'setup.html') },
     { src: join(SHARED, 'ui', 'x402', 'approve.html'), dest: join(outDir, 'ui', 'x402', 'approve.html') },
+    { src: join(SHARED, 'ui', 'admin', 'utxos.html'), dest: join(outDir, 'ui', 'admin', 'utxos.html') },
   ]
   for (const { src, dest } of uiFiles) {
     if (existsSync(src)) {
@@ -89,7 +91,7 @@ function buildTarget(target: Target) {
 
   // Rename tsup outputs to match manifest expectations
   // ESM: .mjs → .js | IIFE: .global.js → .js
-  for (const dir of [outDir, join(outDir, 'ui'), join(outDir, 'ui', 'wallet'), join(outDir, 'ui', 'x402')]) {
+  for (const dir of [outDir, join(outDir, 'ui'), join(outDir, 'ui', 'wallet'), join(outDir, 'ui', 'x402'), join(outDir, 'ui', 'admin')]) {
     if (!existsSync(dir)) continue
     for (const file of readdirSync(dir)) {
       if (file.endsWith('.mjs')) {

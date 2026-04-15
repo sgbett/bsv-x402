@@ -131,6 +131,11 @@ export function getRootKeyHex(): string | null {
   return rootKeyHexInMemory
 }
 
+/** Get the current network ('main' or 'test'). */
+export function getNetwork(): 'main' | 'test' {
+  return walletNetwork
+}
+
 /** Set the network. Only accepts 'main' or 'test'. */
 export function setNetwork(network: string): void {
   if (network === 'main' || network === 'test') {

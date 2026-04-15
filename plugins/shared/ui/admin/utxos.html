@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>x402 — UTXO Admin</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 20px;
+      font-size: 13px;
+    }
+    h1 { color: #00d4aa; margin-bottom: 4px; font-size: 18px; }
+    .subtitle { color: #888; margin-bottom: 16px; }
+    .summary {
+      display: flex; gap: 24px; margin-bottom: 8px;
+      padding: 12px; background: #16213e; border-radius: 6px;
+      flex-wrap: wrap;
+    }
+    .summary .stat { display: flex; flex-direction: column; }
+    .summary .stat .label { color: #888; font-size: 11px; text-transform: uppercase; }
+    .summary .stat .value { color: #00d4aa; font-size: 18px; font-weight: bold; }
+    #status-breakdown {
+      display: flex; gap: 16px; margin-bottom: 16px;
+      padding: 8px 12px; background: #16213e; border-radius: 6px;
+      flex-wrap: wrap;
+    }
+    #status-breakdown .stat { display: flex; flex-direction: column; }
+    #status-breakdown .stat .label { font-size: 11px; text-transform: uppercase; font-weight: bold; }
+    #status-breakdown .stat .value { color: #e0e0e0; font-size: 13px; }
+    .controls { margin-bottom: 12px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .controls button {
+      background: #16213e; color: #00d4aa; border: 1px solid #00d4aa;
+      padding: 6px 14px; border-radius: 4px; cursor: pointer; font-family: inherit; font-size: 12px;
+    }
+    .controls button:hover { background: #00d4aa; color: #1a1a2e; }
+    .controls button:disabled { opacity: 0.5; cursor: default; }
+    .controls select, .controls input {
+      background: #16213e; color: #e0e0e0; border: 1px solid #333;
+      padding: 6px 8px; border-radius: 4px; font-family: inherit; font-size: 12px;
+    }
+    .status { color: #888; font-size: 12px; margin-bottom: 8px; }
+    .error { color: #e74c3c; }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left; padding: 8px 10px; background: #16213e;
+      color: #888; font-size: 11px; text-transform: uppercase;
+      position: sticky; top: 0; cursor: pointer; user-select: none;
+    }
+    th:hover { color: #00d4aa; }
+    td { padding: 6px 10px; border-bottom: 1px solid #222; }
+    tr:hover td { background: #16213e; }
+    .outpoint { font-size: 11px; word-break: break-all; max-width: 300px; }
+    .txid { color: #7aa2f7; }
+    .vout { color: #e0af68; }
+    .sats { text-align: right; font-variant-numeric: tabular-nums; }
+    .spendable-yes { color: #00d4aa; }
+    .spendable-no { color: #e74c3c; }
+    .tx-desc { font-size: 11px; color: #888; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tags { font-size: 11px; color: #888; }
+    .tag { background: #16213e; padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+    a { color: #7aa2f7; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <h1>UTXO Admin</h1>
+  <div class="subtitle" id="subtitle">Loading...</div>
+
+  <div class="summary" id="summary" hidden>
+    <div class="stat">
+      <span class="label">Total outputs</span>
+      <span class="value" id="total-count">-</span>
+    </div>
+    <div class="stat">
+      <span class="label">Spendable</span>
+      <span class="value" id="spendable-count">-</span>
+    </div>
+    <div class="stat">
+      <span class="label">Total value</span>
+      <span class="value" id="total-value">-</span>
+    </div>
+    <div class="stat">
+      <span class="label">Spendable value</span>
+      <span class="value" id="spendable-value">-</span>
+    </div>
+  </div>
+
+  <div id="status-breakdown"></div>
+
+  <div class="controls">
+    <button id="refresh-btn">Refresh</button>
+    <button id="abort-nosend-btn" style="border-color: #e74c3c; color: #e74c3c;">Abort nosend txs</button>
+    <label>Basket:
+      <select id="basket-filter">
+        <option value="default">default</option>
+        <option value="">all baskets</option>
+      </select>
+    </label>
+    <label>Show:
+      <select id="spendable-filter">
+        <option value="all">all</option>
+        <option value="spendable">spendable only</option>
+        <option value="non-spendable">non-spendable only</option>
+      </select>
+    </label>
+    <label>Tx status:
+      <select id="status-filter">
+        <option value="">all statuses</option>
+      </select>
+    </label>
+  </div>
+
+  <div class="status" id="status"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th data-sort="index">#</th>
+        <th data-sort="outpoint">Outpoint</th>
+        <th data-sort="satoshis">Satoshis</th>
+        <th data-sort="spendable">Spendable</th>
+        <th data-sort="txStatus">Tx Status</th>
+        <th>Tx Description</th>
+        <th data-sort="tags">Tags</th>
+      </tr>
+    </thead>
+    <tbody id="output-table"></tbody>
+  </table>
+
+  <script src="utxos.js"></script>
+</body>
+</html>
