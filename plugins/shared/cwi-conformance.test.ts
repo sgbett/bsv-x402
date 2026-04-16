@@ -481,6 +481,72 @@ describe('CWI conformance: spending limits', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 4b. sendWith broadcast bypass — broadcast-only createAction calls
+//
+// When createAction is called with empty outputs and a non-empty sendWith,
+// it broadcasts a previously-created nosend transaction. Spending was
+// already recorded when the nosend tx was created — no validation needed.
+// ---------------------------------------------------------------------------
+
+describe('CWI conformance: sendWith broadcast bypass', () => {
+  it('allows createAction with empty outputs when sendWith is set', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'Broadcast x402 payment',
+      outputs: [],
+      options: { sendWith: ['abc123'] },
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('ok')
+    // Backend reached
+    expect(backend.calls).toHaveLength(1)
+    expect(backend.calls[0].method).toBe('createAction')
+    // No spend check, no payment recorded — already done at nosend creation
+    expect(mockCheckSpendLimits).not.toHaveBeenCalled()
+    expect(mockRecordPayment).not.toHaveBeenCalled()
+  })
+
+  it('still rejects empty outputs without sendWith', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [],
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('error')
+    expect(response.error).toContain('Missing or empty outputs')
+    expect(backend.calls).toHaveLength(0)
+  })
+
+  it('still rejects empty outputs with empty sendWith array', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [],
+      options: { sendWith: [] },
+    })
+    const response = await handleCWIRequest(msg, backend)
+
+    expect(response.status).toBe('error')
+    expect(response.error).toContain('Missing or empty outputs')
+    expect(backend.calls).toHaveLength(0)
+  })
+
+  it('runs full validation when both outputs and sendWith are present', async () => {
+    const msg = makeMessage('createAction', {
+      description: 'test',
+      outputs: [{ satoshis: 200, lockingScript: '00', outputDescription: 'a' }],
+      options: { sendWith: ['abc123'] },
+    })
+    await handleCWIRequest(msg, backend)
+
+    // outputs is non-empty → broadcast bypass does NOT apply, validation runs
+    expect(mockCheckSpendLimits).toHaveBeenCalledTimes(1)
+    expect(mockCheckSpendLimits.mock.calls[0][0].amount).toBe(200)
+    expect(mockRecordPayment).toHaveBeenCalledWith(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 5. BRC-105 proof construction flow
 //
 // Verifies that the three-step BRC-105 sequence (createHmac → getPublicKey →

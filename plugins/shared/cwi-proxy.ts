@@ -25,43 +25,56 @@ export async function handleCWIRequest(
     // Spending check — only on createAction (the method that commits satoshis)
     let validatedSatoshis: number | undefined
     if (request.method === 'createAction') {
-      const params = request.params as { outputs?: Array<{ satoshis: unknown }> } | undefined
+      const params = request.params as {
+        outputs?: Array<{ satoshis: unknown }>
+        options?: { sendWith?: unknown }
+      } | undefined
       const outputs = params?.outputs
+      const sendWith = params?.options?.sendWith
+      const isBroadcastOnly = Array.isArray(sendWith) && sendWith.length > 0
+        && (!Array.isArray(outputs) || outputs.length === 0)
 
-      if (!Array.isArray(outputs) || outputs.length === 0) {
-        return { id: request.id, status: 'error', error: 'Missing or empty outputs for createAction' }
-      }
-
-      // Validate each output's satoshis — must be a positive safe integer, total must stay safe
-      let total = 0
-      for (const o of outputs) {
-        if (typeof o.satoshis !== 'number' || !Number.isSafeInteger(o.satoshis) || o.satoshis <= 0) {
-          return { id: request.id, status: 'error', error: 'Invalid satoshis value in outputs' }
+      if (isBroadcastOnly) {
+        // sendWith-only call broadcasts existing nosend transactions — no new
+        // spend to validate, no autospend check (already recorded when nosend
+        // was created). Skip straight to backend delegation.
+        console.debug('[x402] CWI proxy: sendWith broadcast for', sendWith)
+      } else {
+        if (!Array.isArray(outputs) || outputs.length === 0) {
+          return { id: request.id, status: 'error', error: 'Missing or empty outputs for createAction' }
         }
-        total += o.satoshis
-        if (!Number.isSafeInteger(total)) {
-          return { id: request.id, status: 'error', error: 'Total satoshis exceeds safe integer range' }
-        }
-      }
-      validatedSatoshis = total
 
-      const paymentRequest: PaymentRequest = {
-        amount: validatedSatoshis,
-        origin,
-        protocol: 'x402',
-      }
-
-      const check = checkSpendLimits(paymentRequest)
-      if (!check.allowed) {
-        if (check.requiresConfirmation) {
-          // Payment exceeds autospend — prompt the user
-          const approved = await requestApproval({ amount: validatedSatoshis, origin })
-          if (!approved) {
-            return { id: request.id, status: 'error', error: 'Payment denied by user' }
+        // Validate each output's satoshis — must be a positive safe integer, total must stay safe
+        let total = 0
+        for (const o of outputs) {
+          if (typeof o.satoshis !== 'number' || !Number.isSafeInteger(o.satoshis) || o.satoshis <= 0) {
+            return { id: request.id, status: 'error', error: 'Invalid satoshis value in outputs' }
           }
-          // User approved — proceed
-        } else {
-          return { id: request.id, status: 'error', error: check.reason ?? 'Payment blocked' }
+          total += o.satoshis
+          if (!Number.isSafeInteger(total)) {
+            return { id: request.id, status: 'error', error: 'Total satoshis exceeds safe integer range' }
+          }
+        }
+        validatedSatoshis = total
+
+        const paymentRequest: PaymentRequest = {
+          amount: validatedSatoshis,
+          origin,
+          protocol: 'x402',
+        }
+
+        const check = checkSpendLimits(paymentRequest)
+        if (!check.allowed) {
+          if (check.requiresConfirmation) {
+            // Payment exceeds autospend — prompt the user
+            const approved = await requestApproval({ amount: validatedSatoshis, origin })
+            if (!approved) {
+              return { id: request.id, status: 'error', error: 'Payment denied by user' }
+            }
+            // User approved — proceed
+          } else {
+            return { id: request.id, status: 'error', error: check.reason ?? 'Payment blocked' }
+          }
         }
       }
     }
