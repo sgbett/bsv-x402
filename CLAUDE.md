@@ -34,18 +34,20 @@ This is a browser-side client library for BSV micropayments over HTTP 402. It wr
 **Multi-protocol flow:** `x402Fetch(url)` → server returns 402 → library detects protocol from response headers → constructs payment → retries request with payment proof.
 
 Supported protocols:
-- **Custom (X402):** `X402-Challenge` / `X402-Proof` headers. Direct P2PKH to payee address.
-- **BRC-105:** `x-bsv-payment-*` headers. BRC-29 key derivation with derivation prefix/suffix, identity keys, AtomicBEEF base64 encoding.
+- **Custom (X402):** `X402-Challenge` / `X402-Proof` headers. Direct P2PKH to payee address. Wallet broadcasts immediately (`noSend: false`).
+- **BRC-105:** `x-bsv-payment-*` headers. BRC-29 key derivation with derivation prefix/suffix, identity keys, AtomicBEEF base64 encoding. Adversarial flow: `noSend: true`, broadcast on 200, abort on 4xx.
+- **BRC-121:** `x-bsv-sats` / `x-bsv-server` headers. Simpler than BRC-105, similar key derivation. Same adversarial flow.
 
-Protocol detection is automatic — custom (`X402-Challenge`) takes priority when both are present.
+Protocol detection is automatic — custom (`X402-Challenge`) takes priority, then BRC-105, then BRC-121.
 
 **Key modules:**
-- `src/x402-fetch.ts` — `x402Fetch()` drop-in fetch replacement with `handlePaymentFlow` shared across protocols
+- `src/x402-fetch.ts` — `x402Fetch()` / `createX402Fetch()` drop-in fetch replacement. Handles broadcast-on-200 and abort-on-4xx for BRC-105/BRC-121 flows.
 - `src/challenge.ts` — parses custom `X402-Challenge` header
 - `src/brc105-challenge.ts` — parses BRC-105 `x-bsv-payment-*` headers
-- `src/brc105-proof.ts` — BRC-105 proof construction: BRC-29 derivation, RIPEMD-160, P2PKH, base64 encoding
-- `src/limits.ts` — protocol-agnostic `RateLimiter` accepting `Challenge | PaymentRequest`
-- `src/types.ts` — all types including `Brc105Wallet` (minimal 3-method wallet interface)
+- `src/brc105-proof.ts` — BRC-105 proof construction: BRC-29 derivation, RIPEMD-160, P2PKH, base64 encoding. Returns `{ proof, abort, broadcast }`.
+- `src/brc121-challenge.ts` — parses BRC-121 `x-bsv-sats` / `x-bsv-server` headers
+- `src/brc121-proof.ts` — BRC-121 proof construction. Same `{ proof, abort, broadcast }` pattern.
+- `src/types.ts` — all types including `Brc105Wallet` (wallet interface with `createAction`, `getPublicKey`, `createHmac`, `abortAction`)
 
 **Browser extension plugins** (`plugins/`):
 - `plugins/shared/` — shared code (~90%): CWI proxy (spending controls), page/content scripts, background worker, wallet controller, UI
@@ -63,7 +65,8 @@ The extension is a **BRC-100 wallet with native x402 support** — it provides `
 - **BRC-105** — HTTP Service Monetisation Framework. Server sends 402 with `x-bsv-payment-version`, `x-bsv-payment-satoshis-required`, `x-bsv-payment-derivation-prefix`. Client responds with `x-bsv-payment` JSON containing `derivationPrefix`, `derivationSuffix`, `transaction` (base64).
 - **BRC-29** — key derivation for payments. ProtocolID `[2, '3241645161d8']`, keyID `"${prefix} ${suffix}"`, counterparty is the server's identity key. Used by BRC-105 proof construction.
 - **Custom X402 headers** — `X402-Challenge` (server→client, JSON with nonce/payee/amount/network) and `X402-Proof` (client→server, txid + rawTx). Simpler than BRC-105, no key derivation.
-- **Spending controls** — rate limiter with Doom II tiers, per-site policies, circuit breaker, 2FA gates. Protocol-agnostic via `PaymentRequest` interface.
+- **Spending controls** — autospend with Doom II difficulty tiers, per-tx weapon caps, health-bar balance model. Protocol-agnostic via `PaymentRequest` interface.
+- **Broadcast-on-200** — BRC-105/BRC-121 proofs return `broadcast` and `abort` callbacks. On server 200, `broadcast()` calls `createAction({ sendWith: [txid] })` to transition `nosend` → `unproven`. On 4xx, `abort()` frees locked UTXOs. See [ECONOMICS.md](ECONOMICS.md) and [BEEF-SIGNALLING.md](BEEF-SIGNALLING.md).
 
 ## BSV Browser CWI Conformance (IMPORTANT)
 
@@ -96,4 +99,4 @@ Our CWI implementation **must stay in sync** with the BSV Browser reference impl
 
 ## Status
 
-Active development (v0.4.0). Library core is functional: multi-protocol 402 handling (custom + BRC-105), BRC-29 key derivation with mutual authentication (client identity key in proofs), spending controls with Doom II tiers. Browser extensions ship a full BRC-100 wallet via `@bsv/wallet-toolbox-client` with CWI injection and x402 spending controls.
+Active development (v0.9.1). Library core: multi-protocol 402 handling (Custom X402, BRC-105, BRC-121), adversarial `noSend` payment flow with broadcast-on-200/abort-on-4xx, BEEF acknowledgement mechanism. Browser extensions: full BRC-100 wallet via `@bsv/wallet-toolbox-client`, CWI injection, autospend controls, UTXO admin/recovery tools.

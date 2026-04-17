@@ -1,4 +1,6 @@
-# Implementation Plan: Browser Extension Plugins for bsv-x402
+# Implementation Plan: Browser Extension Plugins for bsv-x402 (COMPLETED)
+
+> **Status:** This plan was fully implemented in v0.2.0 (2026-04-01). Some modules referenced here (`cwi.ts`, `key-manager.ts`, `tx-builder.ts`) were subsequently replaced by `@bsv/wallet-toolbox-client` delegation. Retained as historical reference for the original architecture decisions.
 
 ## 1. Overview and Architecture
 

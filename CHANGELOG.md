@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.9.1] - 2026-04-16
+
+### Fixed
+
+- **CWI proxy sendWith bypass** — `createAction` with empty outputs and `sendWith` was rejected by the CWI proxy, silently breaking the broadcast-on-200 flow. The proxy now allows broadcast-only calls (empty outputs + non-empty `sendWith`) through without autospend checks (#157, #158)
+
+## [0.9.0] - 2026-04-15
+
+### Added
+
+- **Broadcast-on-200** — BRC-105 and BRC-121 proof constructors now return a `broadcast` callback alongside `abort`. On server 200, `x402Fetch` calls `broadcast()` which triggers `createAction({ sendWith: [txid] })` to transition `nosend` → `unproven`, unblocking change outputs. Fire-and-forget — failures logged but never block the response. (#151, #152, #153, #154, #155)
+- **`sendWith` on `CWICreateActionParams`** — enables proof constructors to broadcast nosend transactions via the wallet (#152)
+
+## [0.8.0] - 2026-04-15
+
+### Added
+
+- **UTXO recovery tool** — "Verify UTXOs" button checks each spendable output against WhatsOnChain, relinquishes confirmed-spent outputs. Sequential requests with 500ms delay and 2s backoff retry on 429 rate limiting. (#146, #147, #148, #149, #150)
+- **UTXO Admin view** — opens in a full tab showing all wallet outputs with tx status (completed/unproven/nosend/failed), description, colour-coded status breakdown, sortable columns, basket and status filters. Exposes the root cause of "insufficient funds" — nosend transactions locking change outputs.
+- **Abort nosend tool** — button in UTXO Admin to abort all stuck nosend transactions via wallet-toolbox specOp, freeing locked outputs
+- **`checkOutpointSpent()`** — chain lookup via WhatsOnChain API with 8s timeout and `WocRateLimitError` class
+- **`verifyUtxos()`** — sequential verification with configurable delay/backoff, relinquishes only confirmed-spent outputs (never on error)
+- **`getNetwork()` export** on wallet controller
+
+## [0.7.0] - 2026-04-14
+
+### Added
+
+- **BRC-121 Simple 402 support** — `x402Fetch` handles BRC-121 402 responses (`x-bsv-sats`, `x-bsv-server` headers) with proof construction, retry, abort/broadcast callbacks. Same adversarial `noSend` flow as BRC-105. (#138, #139, #140, #141, #145)
+- **BEEF acknowledgement mechanism** — `x402Fetch` injects `x-bsv-ack` headers for acknowledged pending BEEFs, processes `pendingBeefs` in server responses via `internalizeAction`. Supports refund/health-credit flows. (#129, #135, #136)
+- **Three-state retry for BRC-105** — network retry loop (resend same signed tx), server rejection path (abort + fresh retry), network error path (neither broadcast nor abort). (#123, #125)
+- **Autospend refund recording** — CWI proxy intercepts `internalizeAction` to parse BEEF for wallet payment outputs and record refunds against autospend balance (#117, #118, #119, #120)
+- **Send funds UI** — P2PKH transfer from popup with async Base58Check checksum verification (#111, #112, #113)
+- **Auto-lock fix** — alarm fires immediately on service worker restart (#114)
+
 ## [0.6.0] - 2026-04-07
 
 ### Changed
