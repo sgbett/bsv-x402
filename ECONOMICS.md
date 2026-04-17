@@ -53,7 +53,7 @@ Given the above, the correct stance for an x402 wallet is:
 
 1. **Use `noSend: true`** when constructing the payment transaction. Hold the signed BEEF locally.
 2. **Send the BEEF to the server** in the payment header.
-3. **On HTTP 200**, broadcast immediately via `sendWith`. Don't wait for `MINED`. The server has the BEEF and can broadcast independently — your broadcast is for local state transition (unblocking change outputs) as much as for getting it on-chain.
+3. **On HTTP 200**, call `sendWith` to transition the wallet's local state from `nosend` → `unproven`. This triggers the wallet-toolbox to broadcast using its own Full BEEF (retained from `createAction`). The primary purpose is unblocking change outputs — the server has already committed to broadcasting independently. The client does NOT re-broadcast the server's response; it broadcasts its own copy.
 4. **On HTTP 4xx**, abort. The signed tx never propagated, the inputs are released for reuse.
 5. **On network error**, do nothing. Don't broadcast (server may have already done so), don't abort (tx may be on-chain). Surface to the user as "payment state unknown".
 
@@ -66,7 +66,7 @@ For the server side, the symmetric correct stance is:
 
 When both sides follow this, you get:
 - **Adversarial safety**: client only commits to broadcast on server acceptance; server only accepts valid BEEFs
-- **Redundant broadcast**: either side's network call lands the tx; ARC deduplicates by txid when receiving Full BEEF (note: Atomic BEEF POST is NOT idempotent — see [BEEF-SIGNALLING.md](BEEF-SIGNALLING.md))
+- **Redundant broadcast**: both sides submit the same txid to ARC using their own Full BEEF. The server broadcasts the Full BEEF it received from the client. The client broadcasts via `sendWith` using the Full BEEF its wallet retained from `createAction`. ARC deduplicates by txid. (Note: Atomic BEEF POST to ARC is NOT idempotent — see [BEEF-SIGNALLING.md](BEEF-SIGNALLING.md). Only Full BEEF works for broadcast.)
 - **Sub-second UX**: no party waits for `MINED`
 - **Bounded loss**: failures cost fees, not principal
 
@@ -78,7 +78,7 @@ The current BSV ecosystem is split on this:
 - **bsv-x402 (this implementation)**: `noSend` + broadcast on 200. Adversarial safety preserved. Slightly more complex; relies on either side broadcasting after handshake.
 - **Some servers**: expect the wallet to broadcast first and won't return 200 until they see the tx propagate. Stalemate with `noSend` clients.
 
-The convergent answer — the one that satisfies all three positions — is the one above: server commits to broadcast, returns 200 on receipt of valid BEEF. Wallet broadcasts on 200 too. Both broadcasts are belt-and-braces; neither side is left exposed.
+The convergent answer — the one that satisfies all three positions — is the one above: server commits to broadcast the Full BEEF it received, returns 200 immediately. Client calls `sendWith` on 200 to broadcast its own retained Full BEEF and transition wallet state. Both sides independently submit the same tx to ARC using their own Full BEEF copies — neither relies on the other's broadcast succeeding.
 
 ## Summary
 
