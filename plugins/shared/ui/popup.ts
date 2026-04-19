@@ -5,6 +5,9 @@ import type { PopupState } from "./state";
 import { initRouter, registerPages, navigate, getCurrentPage } from "./router";
 import { renderHeader, updateHeader } from "./components/header";
 import * as home from "./pages/home";
+import * as payments from "./pages/payments";
+import * as transactions from "./pages/transactions";
+import * as settings from "./pages/settings";
 
 // Build-time constants injected by tsup --define
 declare const __X402_VERSION__: string;
@@ -34,8 +37,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   registerPages({
     home,
     payments: placeholder,
-    transactions: placeholder,
-    settings: placeholder,
+    transactions,
+    settings,
   });
 
   // Fetch state from service worker (spinner stays visible until this resolves)
