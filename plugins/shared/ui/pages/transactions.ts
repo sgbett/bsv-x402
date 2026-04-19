@@ -51,11 +51,11 @@ function fetchAndRender(
       renderPage(container, state, result, offset, setOffset)
     })
     .catch((err) => {
-      container.innerHTML = `
-        <div class="tx-empty">
-          Failed to load transactions: ${err instanceof Error ? err.message : String(err)}
-        </div>
-      `
+      const errorEl = document.createElement('div')
+      errorEl.className = 'tx-empty'
+      errorEl.textContent = `Failed to load transactions: ${err instanceof Error ? err.message : String(err)}`
+      container.innerHTML = ''
+      container.appendChild(errorEl)
     })
 }
 

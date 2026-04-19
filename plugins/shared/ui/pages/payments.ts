@@ -15,6 +15,8 @@ type ReceiveMode = "identity" | "address";
 /** Cached wallet info so we don't re-fetch on every toggle */
 let cachedIdentityKey = "";
 let cachedAddress = "";
+let fetchRetryCount = 0;
+const MAX_FETCH_RETRIES = 3;
 
 /**
  * Render the Payments page into the given container.
@@ -150,6 +152,7 @@ async function fetchWalletInfo(): Promise<void> {
     );
     if (result.identityKey) cachedIdentityKey = result.identityKey;
     if (result.address) cachedAddress = result.address;
+    fetchRetryCount = 0;
   } catch {
     // Wallet may be locked — data stays empty until next attempt
   }
@@ -184,9 +187,14 @@ function showReceiveData(container: HTMLElement, mode: ReceiveMode): void {
   const data = mode === "identity" ? cachedIdentityKey : cachedAddress;
 
   if (!data) {
+    if (fetchRetryCount >= MAX_FETCH_RETRIES) {
+      qrContainer.innerHTML = `<p class="qr-placeholder">Unavailable — wallet may be locked</p>`;
+      textEl.textContent = "";
+      return;
+    }
     qrContainer.innerHTML = `<p class="qr-placeholder">Loading...</p>`;
     textEl.textContent = "";
-    // Try fetching again
+    fetchRetryCount++;
     fetchWalletInfo().then(() => showReceiveData(container, mode));
     return;
   }

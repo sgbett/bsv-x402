@@ -3,6 +3,7 @@
 import { fetchState, startPolling } from "./state";
 import type { PopupState } from "./state";
 import { initRouter, registerPages, navigate, getCurrentPage } from "./router";
+import type { Page } from "./router";
 import { renderHeader, updateHeader } from "./components/header";
 import * as home from "./pages/home";
 import * as payments from "./pages/payments";
@@ -60,11 +61,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     versionEl.textContent = `v${__X402_VERSION__} (${__X402_GIT_REF__})`;
   }
 
-  // Poll state to keep the UI fresh
+  // Poll state to keep the UI fresh (incremental update, not full re-render)
   startPolling((newState) => {
     state = newState;
-    // Re-render the active page with updated state
-    navigate(getCurrentPage(), pageContainer, state);
+    const currentPageModule = { home, payments, transactions, settings }[getCurrentPage()] as Page & { update?: (c: HTMLElement, s: PopupState) => void };
+    if (currentPageModule?.update) {
+      currentPageModule.update(pageContainer, state);
+    }
     updateHeader(headerEl, state, getCurrentPage());
   });
 
