@@ -424,7 +424,7 @@ chrome.runtime.onMessage.addListener(
       }
 
       // Reset idle timer — wallet is actively being used
-      chrome.alarms.create('auto-lock', { delayInMinutes: 15, periodInMinutes: 15 })
+      chrome.alarms.create('auto-lock', { delayInMinutes: 60, periodInMinutes: 60 })
 
       handleCWIRequest(message, wallet.getBackend(), sender.tab?.id)
         .then((response) => {
@@ -548,10 +548,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 })
 
 // ---------------------------------------------------------------------------
-// Auto-lock after 15 minutes of idle
+// Auto-lock after 60 minutes of idle
 // ---------------------------------------------------------------------------
 
-chrome.alarms.create('auto-lock', { delayInMinutes: 15, periodInMinutes: 15 })
+chrome.alarms.create('auto-lock', { delayInMinutes: 60, periodInMinutes: 60 })
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'auto-lock' && wallet.isUnlocked()) {
