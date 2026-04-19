@@ -7,126 +7,16 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <div class="popup">
-    <header>
-      <h1>bsv-x402</h1>
-      <span id="status-indicator" class="status locked">Locked</span>
-    </header>
+  <!-- Loading spinner — visible by default, hidden once state arrives -->
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    <span>Loading...</span>
+  </div>
 
-    <!-- ============================================================
-         Wallet panel — only shown when built-in backend is active.
-         This entire section can be removed when a proper wallet UI
-         package exists. It MUST NOT reference x402 concerns.
-         ============================================================ -->
-    <div id="wallet-panel">
-      <section class="balance">
-        <label>Balance</label>
-        <span id="balance-display">--- sats</span>
-      </section>
-
-      <section id="address-section" class="address-section" hidden>
-        <label>Receive Address</label>
-        <div class="address-row">
-          <span id="address-display" class="address-text"></span>
-          <button id="copy-address-btn" class="copy-btn" title="Copy address">Copy</button>
-        </div>
-      </section>
-
-      <section id="identity-section" class="address-section" hidden>
-        <label>Identity Key</label>
-        <div class="address-row">
-          <span id="identity-display" class="address-text"></span>
-          <button id="copy-identity-btn" class="copy-btn" title="Copy identity key">Copy</button>
-        </div>
-      </section>
-
-      <div class="actions">
-        <div id="unlock-form" class="unlock-form" hidden>
-          <input type="password" id="unlock-password" placeholder="Enter password" autocomplete="current-password">
-          <div id="unlock-error" class="unlock-error"></div>
-        </div>
-        <button id="lock-btn" class="btn lock-btn locked">Unlock</button>
-      </div>
-
-      <div id="setup-container" class="setup-container" hidden>
-        <button id="setup-btn" class="btn setup-btn">Set Up Wallet</button>
-      </div>
-    </div>
-
-    <!-- ============================================================
-         x402 panel — autospend controls
-         ============================================================ -->
-    <div id="x402-panel">
-      <section class="tier">
-        <label>Difficulty</label>
-        <select id="tier-select">
-          <option value="I'm Too Young to Die">I'm Too Young to Die</option>
-          <option value="Hey, Not Too Rough">Hey, Not Too Rough</option>
-          <option value="Hurt Me Plenty" selected>Hurt Me Plenty</option>
-          <option value="Ultra-Violence">Ultra-Violence</option>
-          <option value="Nightmare!">Nightmare!</option>
-        </select>
-      </section>
-
-      <section class="weapon">
-        <label>Weapon (per-tx max)</label>
-        <select id="weapon-select">
-          <option value="Fists">Fists (100k sats)</option>
-          <option value="Chainsaw">Chainsaw (250k sats)</option>
-          <option value="Pistol">Pistol (500k sats)</option>
-          <option value="Shotgun" selected>Shotgun (1M sats)</option>
-          <option value="Super Shotgun">Super Shotgun (10M sats)</option>
-          <option value="Chaingun">Chaingun (50M sats)</option>
-          <option value="Rocket Launcher">Rocket Launcher (250M sats)</option>
-          <option value="Plasma Rifle">Plasma Rifle (1B sats)</option>
-          <option value="BFG9000">BFG9000 (no limit)</option>
-        </select>
-      </section>
-
-      <section class="autospend">
-        <label>Autospend Balance</label>
-        <div class="health-bar">
-          <div id="health-bar-fill" class="health-bar-fill"></div>
-        </div>
-        <div class="autospend-text">
-          <span id="autospend-value">-- sats</span>
-          <span id="autospend-cap">/ -- sats</span>
-        </div>
-      </section>
-
-      <section class="pickups">
-        <label>Pickups (recharge autospend)</label>
-        <div class="pickup-buttons">
-          <button class="pickup-btn" data-pickup="Medkit">Medkit +10%</button>
-          <button class="pickup-btn" data-pickup="Stimpak">Stimpak +25%</button>
-          <button class="pickup-btn" data-pickup="Soul Sphere">Soul Sphere +100%</button>
-          <button class="pickup-btn new-game" data-pickup="New Game">New Game</button>
-        </div>
-      </section>
-
-      <section id="send-section" class="address-section">
-        <label>Send</label>
-        <div class="send-form">
-          <input type="text" id="send-address" placeholder="BSV address">
-          <input type="number" id="send-amount" placeholder="Amount (sats)">
-          <button id="send-btn" class="btn send-btn">Send</button>
-          <div id="send-result" class="unlock-error"></div>
-        </div>
-      </section>
-    </div>
-
-    <!-- ============================================================
-         Tools panel — wallet maintenance
-         ============================================================ -->
-    <div id="tools-panel" hidden>
-      <section class="tier">
-        <label>Tools</label>
-        <button id="verify-utxos-btn" class="btn verify-btn">Verify UTXOs</button>
-        <div id="verify-result" class="verify-result"></div>
-        <button id="utxo-admin-btn" class="btn verify-btn" style="margin-top: 6px;">UTXO Admin</button>
-      </section>
-    </div>
-
+  <!-- App shell — hidden until state is fetched (fixes flash-of-locked-state) -->
+  <div id="app" class="popup" hidden>
+    <div id="header"></div>
+    <div id="page-container"></div>
     <footer>
       <span class="footer-text">x402 Wallet <span id="version-info"></span></span>
     </footer>
