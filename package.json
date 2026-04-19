@@ -43,6 +43,7 @@
     "tsx": "^4.21.0",
     "typedoc": "^0.28.18",
     "typescript": "^5.0.0",
+    "qr-creator": "^1.0.0",
     "vitest": "^3.0.0"
   }
 }

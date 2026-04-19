@@ -14,16 +14,6 @@ declare const __X402_VERSION__: string;
 declare const __X402_GIT_REF__: string;
 
 // ---------------------------------------------------------------------------
-// Placeholder page for tabs not yet implemented
-// ---------------------------------------------------------------------------
-
-const placeholder = {
-  render(container: HTMLElement, _state: PopupState): void {
-    container.innerHTML = `<p class="placeholder">Coming soon</p>`;
-  },
-};
-
-// ---------------------------------------------------------------------------
 // Initialisation
 // ---------------------------------------------------------------------------
 
@@ -33,10 +23,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   const headerEl = document.getElementById("header")!;
   const pageContainer = document.getElementById("page-container")!;
 
-  // Register page modules — only Home is implemented; others are placeholders
+  // Register page modules
   registerPages({
     home,
-    payments: placeholder,
+    payments,
     transactions,
     settings,
   });
