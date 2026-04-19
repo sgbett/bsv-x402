@@ -46,7 +46,7 @@ function formatSats(sats: number): string {
  *  - Difficulty tier dropdown (autospend limit)
  *  - Weapon dropdown (per-transaction cap)
  *  - Tools: Verify UTXOs, UTXO Admin
- *  - Recovery placeholder (deferred to Task 8)
+ *  - Recovery: seed preview, export, import
  */
 export function render(container: HTMLElement, state: PopupState): void {
   const tierOptions = TIER_NAMES.map(
@@ -85,7 +85,16 @@ export function render(container: HTMLElement, state: PopupState): void {
 
     <section class="settings-section">
       <label>Recovery</label>
-      <p class="placeholder">Coming soon</p>
+      <div class="recovery-seed">
+        <span class="recovery-seed-label">Seed:</span>
+        <span class="recovery-seed-value" id="settings-seed-preview">---</span>
+      </div>
+      <div class="recovery-buttons">
+        <button class="btn tool-btn" id="settings-export-btn">Export Wallet</button>
+        <button class="btn tool-btn" id="settings-import-btn">Import Wallet</button>
+      </div>
+      <div id="settings-recovery-status" class="recovery-status"></div>
+      <input type="file" id="settings-import-input" accept=".json" style="display:none">
     </section>
   `;
 
@@ -181,6 +190,122 @@ export function render(container: HTMLElement, state: PopupState): void {
     chrome.tabs.create({
       url: chrome.runtime.getURL("ui/admin/utxos.html"),
     });
+  });
+
+  // --- Seed preview ---
+  const seedPreview = container.querySelector<HTMLSpanElement>(
+    "#settings-seed-preview",
+  )!;
+
+  if (state.isUnlocked) {
+    sendMessage<{ preview: string }>("getRootKeyPreview")
+      .then((result) => {
+        seedPreview.textContent = result.preview;
+      })
+      .catch(() => {
+        seedPreview.textContent = "unavailable";
+      });
+  } else {
+    seedPreview.textContent = "locked";
+  }
+
+  // --- Recovery status helper ---
+  const recoveryStatus = container.querySelector<HTMLDivElement>(
+    "#settings-recovery-status",
+  )!;
+
+  function showRecoveryStatus(
+    text: string,
+    type: "success" | "error" | "info",
+  ): void {
+    recoveryStatus.textContent = text;
+    recoveryStatus.className = `recovery-status recovery-${type}`;
+  }
+
+  // --- Export Wallet ---
+  const exportBtn = container.querySelector<HTMLButtonElement>(
+    "#settings-export-btn",
+  )!;
+  exportBtn.addEventListener("click", async () => {
+    exportBtn.disabled = true;
+    exportBtn.textContent = "Exporting...";
+    recoveryStatus.textContent = "";
+    recoveryStatus.className = "recovery-status";
+
+    try {
+      const result = await sendMessage<{ json: string }>("adminExportWallet");
+      // Trigger download
+      const blob = new Blob([result.json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const date = new Date().toISOString().slice(0, 10);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `x402-wallet-backup-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showRecoveryStatus("Backup downloaded", "success");
+    } catch (err) {
+      showRecoveryStatus(
+        `Export failed: ${err instanceof Error ? err.message : String(err)}`,
+        "error",
+      );
+    } finally {
+      exportBtn.disabled = false;
+      exportBtn.textContent = "Export Wallet";
+    }
+  });
+
+  // --- Import Wallet ---
+  const importBtn = container.querySelector<HTMLButtonElement>(
+    "#settings-import-btn",
+  )!;
+  const importInput = container.querySelector<HTMLInputElement>(
+    "#settings-import-input",
+  )!;
+
+  importBtn.addEventListener("click", () => {
+    recoveryStatus.textContent = "";
+    recoveryStatus.className = "recovery-status";
+    importInput.click();
+  });
+
+  importInput.addEventListener("change", async () => {
+    const file = importInput.files?.[0];
+    if (!file) return;
+
+    // Confirmation dialog — importing is destructive
+    const confirmed = confirm(
+      "This will replace your current wallet data. Are you sure you want to continue?",
+    );
+    if (!confirmed) {
+      importInput.value = "";
+      return;
+    }
+
+    importBtn.disabled = true;
+    importBtn.textContent = "Importing...";
+
+    try {
+      const json = await file.text();
+      const result = await sendMessage<{ success: boolean; message: string }>(
+        "adminImportWallet",
+        { json },
+      );
+      showRecoveryStatus(result.message, "success");
+      // Reload the popup after a short delay to pick up the locked state
+      setTimeout(() => location.reload(), 1500);
+    } catch (err) {
+      showRecoveryStatus(
+        `Import failed: ${err instanceof Error ? err.message : String(err)}`,
+        "error",
+      );
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = "Import Wallet";
+      importInput.value = "";
+    }
   });
 }
 

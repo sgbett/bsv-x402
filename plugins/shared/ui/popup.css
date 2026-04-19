@@ -474,6 +474,49 @@ label {
 }
 
 /* ---------------------------------------------------------------------------
+   Recovery section
+   --------------------------------------------------------------------------- */
+
+.recovery-seed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #16213e;
+  border: 1px solid #2a2a4a;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+}
+
+.recovery-seed-label {
+  font-size: 12px;
+  color: #888;
+}
+
+.recovery-seed-value {
+  font-size: 13px;
+  font-family: 'SF Mono', 'Fira Code', 'Courier New', monospace;
+  color: #e0e0e0;
+  letter-spacing: 0.5px;
+}
+
+.recovery-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.recovery-status {
+  font-size: 12px;
+  margin-top: 6px;
+  min-height: 0;
+}
+.recovery-status.recovery-success { color: #00d4aa; }
+.recovery-status.recovery-error { color: #e74c3c; }
+.recovery-status.recovery-info { color: #3498db; }
+
+/* ---------------------------------------------------------------------------
    Transactions page
    --------------------------------------------------------------------------- */
 

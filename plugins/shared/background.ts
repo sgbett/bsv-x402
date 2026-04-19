@@ -181,6 +181,9 @@ interface InternalMessage {
     | 'listTransactions'
     | 'adminListOutputs'
     | 'adminAbortNosend'
+    | 'getRootKeyPreview'
+    | 'adminExportWallet'
+    | 'adminImportWallet'
   payload?: unknown
 }
 
@@ -408,6 +411,71 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       return { aborted: result.totalActions, balance: walletState.balance }
     }
 
+    case 'getRootKeyPreview': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const rootKey = wallet.getRootKeyHex()
+      if (!rootKey) throw new Error('Root key not available')
+      // Only expose first 4 + last 2 characters — never the full key
+      const preview = rootKey.slice(0, 4) + '...' + rootKey.slice(-2)
+      return { preview }
+    }
+
+    case 'adminExportWallet': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const chain = wallet.getNetwork()
+      const dbName = `x402-wallet-${chain}`
+      const exportData = await exportIndexedDB(dbName)
+      // Also export chaintracks database
+      const chainTracksDbName = `chaintracks-${chain}net`
+      let chainTracksData: Record<string, unknown[]> | null = null
+      try {
+        chainTracksData = await exportIndexedDB(chainTracksDbName)
+      } catch {
+        // Chaintracks DB may not exist yet — not critical
+      }
+      const backup = {
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        chain,
+        databases: {
+          [dbName]: exportData,
+          ...(chainTracksData ? { [chainTracksDbName]: chainTracksData } : {}),
+        },
+      }
+      // Encode as JSON string (popup will handle the download)
+      return { json: JSON.stringify(backup) }
+    }
+
+    case 'adminImportWallet': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const importPayload = message.payload as { json: string } | undefined
+      if (!importPayload?.json) throw new Error('No backup data provided')
+
+      let backup: {
+        version: number
+        chain: string
+        databases: Record<string, Record<string, unknown[]>>
+      }
+      try {
+        backup = JSON.parse(importPayload.json)
+      } catch {
+        throw new Error('Invalid backup file — could not parse JSON')
+      }
+
+      if (!backup.version || !backup.databases) {
+        throw new Error('Invalid backup file — missing version or databases')
+      }
+
+      // Import each database
+      for (const [dbName, stores] of Object.entries(backup.databases)) {
+        await importIndexedDB(dbName, stores)
+      }
+
+      // Lock and require re-unlock to pick up new data
+      wallet.lock()
+      return { success: true, message: 'Wallet data imported. Please unlock to continue.' }
+    }
+
     default:
       throw new Error(`Unknown message type: ${(message as InternalMessage).type}`)
   }
@@ -562,6 +630,98 @@ chrome.runtime.onInstalled.addListener((details) => {
     console.log(`x402: extension updated (reason: ${details.reason})`)
   }
 })
+
+// ---------------------------------------------------------------------------
+// IndexedDB export/import helpers — used for wallet backup/restore
+// ---------------------------------------------------------------------------
+
+/**
+ * Export all object stores from an IndexedDB database as a JSON-friendly object.
+ * Dynamically enumerates stores rather than hardcoding names.
+ */
+function exportIndexedDB(dbName: string): Promise<Record<string, unknown[]>> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName)
+    request.onerror = () => reject(new Error(`Failed to open database: ${dbName}`))
+    request.onsuccess = () => {
+      const db = request.result
+      const storeNames = Array.from(db.objectStoreNames)
+      if (storeNames.length === 0) {
+        db.close()
+        resolve({})
+        return
+      }
+
+      const result: Record<string, unknown[]> = {}
+      let completed = 0
+
+      const tx = db.transaction(storeNames, 'readonly')
+      tx.onerror = () => {
+        db.close()
+        reject(new Error(`Transaction failed while reading ${dbName}`))
+      }
+
+      for (const storeName of storeNames) {
+        const store = tx.objectStore(storeName)
+        const getAllReq = store.getAll()
+        getAllReq.onsuccess = () => {
+          result[storeName] = getAllReq.result
+          completed++
+          if (completed === storeNames.length) {
+            db.close()
+            resolve(result)
+          }
+        }
+        getAllReq.onerror = () => {
+          db.close()
+          reject(new Error(`Failed to read store: ${storeName}`))
+        }
+      }
+    }
+  })
+}
+
+/**
+ * Import data into an IndexedDB database, clearing existing stores first.
+ * Opens the database (which must already exist with the correct schema)
+ * and replaces all data in the matching object stores.
+ */
+function importIndexedDB(dbName: string, stores: Record<string, unknown[]>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName)
+    request.onerror = () => reject(new Error(`Failed to open database: ${dbName}`))
+    request.onsuccess = () => {
+      const db = request.result
+      const existingStores = Array.from(db.objectStoreNames)
+      const storeNames = Object.keys(stores).filter((name) => existingStores.includes(name))
+
+      if (storeNames.length === 0) {
+        db.close()
+        resolve()
+        return
+      }
+
+      const tx = db.transaction(storeNames, 'readwrite')
+      tx.onerror = () => {
+        db.close()
+        reject(new Error(`Transaction failed while writing to ${dbName}`))
+      }
+      tx.oncomplete = () => {
+        db.close()
+        resolve()
+      }
+
+      for (const storeName of storeNames) {
+        const store = tx.objectStore(storeName)
+        // Clear existing data before importing
+        store.clear()
+        for (const record of stores[storeName]) {
+          store.put(record)
+        }
+      }
+    }
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Auto-lock after 60 minutes of idle
