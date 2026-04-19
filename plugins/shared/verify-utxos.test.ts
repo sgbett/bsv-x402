@@ -23,7 +23,7 @@ const TX2 = 'ccdd'.repeat(16)
 const TX3 = 'eeff'.repeat(16)
 
 /** Skip inter-request delay in tests */
-const opts = { delayMs: 0, backoffMs: 0 }
+const opts = { delayMs: 0, initialBackoffMs: 0, maxRetries: 1 }
 
 describe('verifyUtxos', () => {
   let backend: WalletBackend
@@ -151,13 +151,16 @@ describe('verifyUtxos', () => {
       .mockResolvedValueOnce(false) // output 0: unspent
       .mockRejectedValueOnce(new checkModule.WocRateLimitError()) // output 1: rate-limited
       .mockRejectedValueOnce(new checkModule.WocRateLimitError()) // output 1 retry: still limited
+      .mockResolvedValueOnce(false) // output 2: unspent (continues after skip)
+      .mockResolvedValueOnce(false) // output 3: unspent
+      .mockResolvedValueOnce(false) // output 4: unspent
 
     const result = await verifyUtxos(backend, 'main', opts)
 
-    // Checked output 0, then rate-limited twice on output 1 — stops
-    expect(result.checked).toBe(1)
-    expect(result.failed).toBe(0)
-    expect(checkOutpointSpent).toHaveBeenCalledTimes(3)
+    // Output 0 checked, output 1 failed after retries, outputs 2-4 checked
+    expect(result.checked).toBe(4)
+    expect(result.failed).toBe(1)
+    expect(checkOutpointSpent).toHaveBeenCalledTimes(6) // 1 + 2 (1 retry fail) + 3
   })
 
   it('passes correct network to checkOutpointSpent', async () => {
