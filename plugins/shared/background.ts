@@ -178,6 +178,7 @@ interface InternalMessage {
     | 'approvalResponse'
     | 'sendFunds'
     | 'verifyUtxos'
+    | 'listTransactions'
     | 'adminListOutputs'
     | 'adminAbortNosend'
   payload?: unknown
@@ -321,6 +322,21 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       }
       const x402State = x402.getX402State()
       return { ...walletState, ...x402State, verifyResult }
+    }
+
+    case 'listTransactions': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const backend = wallet.getBackend()
+      const payload = message.payload as { offset?: number } | undefined
+      const result = await backend.call('listActions', {
+        labels: [],
+        limit: 20,
+        offset: payload?.offset ?? 0,
+        includeLabels: true,
+        includeInputs: true,
+        includeOutputs: true,
+      }, 'self') as { totalActions: number; actions: Array<{ txid: string; satoshis: number; status: string; isOutgoing: boolean; description: string; labels?: string[] }> }
+      return { totalActions: result.totalActions, actions: result.actions }
     }
 
     case 'adminListOutputs': {
