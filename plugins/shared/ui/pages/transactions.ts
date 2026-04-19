@@ -77,7 +77,8 @@ function renderPage(
   const listEl = document.createElement('div')
   listEl.className = 'tx-list'
 
-  for (const action of result.actions) {
+  // Show newest first
+  for (const action of [...result.actions].reverse()) {
     listEl.appendChild(renderTxRow(action, state.network))
   }
 

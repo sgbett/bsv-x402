@@ -447,7 +447,7 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
     }
 
     case 'adminImportWallet': {
-      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      // No unlock check — import must work when locked (recovery scenario)
       const importPayload = message.payload as { json: string } | undefined
       if (!importPayload?.json) throw new Error('No backup data provided')
 
@@ -471,8 +471,8 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
         await importIndexedDB(dbName, stores)
       }
 
-      // Lock and require re-unlock to pick up new data
-      wallet.lock()
+      // Ensure locked state so re-unlock picks up imported data
+      if (wallet.isUnlocked()) wallet.lock()
       return { success: true, message: 'Wallet data imported. Please unlock to continue.' }
     }
 

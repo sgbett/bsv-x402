@@ -44,7 +44,7 @@ export function renderTxRow(action: WalletAction, network: string): HTMLElement 
     amountEl.textContent = '0 sats'
     amountEl.classList.add('tx-amount-zero')
   } else if (action.isOutgoing) {
-    amountEl.textContent = `-${action.satoshis.toLocaleString()} sats`
+    amountEl.textContent = `${action.satoshis.toLocaleString()} sats`
     amountEl.classList.add('tx-amount-sent')
   } else {
     amountEl.textContent = `+${action.satoshis.toLocaleString()} sats`

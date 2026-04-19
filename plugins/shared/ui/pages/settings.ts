@@ -59,17 +59,19 @@ export function render(container: HTMLElement, state: PopupState): void {
       `<option value="${name}"${state.weapon === name ? " selected" : ""}>${name} (${formatSats(WEAPON_CAPS[name])})</option>`,
   ).join("");
 
+  const locked = !state.isUnlocked;
+
   container.innerHTML = `
     <section class="settings-section">
       <label>Difficulty <span class="label-hint">(Autospend limit)</span></label>
-      <select class="select" id="settings-tier-select">
+      <select class="select" id="settings-tier-select"${locked ? " disabled" : ""}>
         ${tierOptions}
       </select>
     </section>
 
     <section class="settings-section">
       <label>Weapon <span class="label-hint">(Per-transaction cap)</span></label>
-      <select class="select" id="settings-weapon-select">
+      <select class="select" id="settings-weapon-select"${locked ? " disabled" : ""}>
         ${weaponOptions}
       </select>
     </section>
@@ -77,8 +79,8 @@ export function render(container: HTMLElement, state: PopupState): void {
     <section class="settings-section">
       <label>Tools</label>
       <div class="tools-buttons">
-        <button class="btn tool-btn" id="settings-verify-btn">Verify UTXOs</button>
-        <button class="btn tool-btn" id="settings-admin-btn">UTXO Admin</button>
+        <button class="btn tool-btn" id="settings-verify-btn"${locked ? " disabled" : ""}>Verify UTXOs</button>
+        <button class="btn tool-btn" id="settings-admin-btn"${locked ? " disabled" : ""}>UTXO Admin</button>
       </div>
       <div id="settings-verify-result" class="verify-result"></div>
     </section>
@@ -87,13 +89,14 @@ export function render(container: HTMLElement, state: PopupState): void {
       <label>Recovery</label>
       <div class="recovery-seed">
         <span class="recovery-seed-label">Seed:</span>
-        <span class="recovery-seed-value" id="settings-seed-preview">---</span>
+        <span class="recovery-seed-value" id="settings-seed-preview">${locked ? "locked" : "---"}</span>
       </div>
       <div class="recovery-buttons">
-        <button class="btn tool-btn" id="settings-export-btn">Export Wallet</button>
+        <button class="btn tool-btn" id="settings-export-btn"${locked ? " disabled" : ""}>Export Wallet</button>
         <button class="btn tool-btn" id="settings-import-btn">Import Wallet</button>
       </div>
       <div id="settings-recovery-status" class="recovery-status"></div>
+      ${state.isSetUp ? '<div class="recovery-warning">WARNING: Import will destroy existing wallet</div>' : ""}
       <input type="file" id="settings-import-input" accept=".json" style="display:none">
     </section>
   `;

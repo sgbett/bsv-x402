@@ -1,4 +1,5 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
+[hidden] { display: none !important; }
 
 body {
   width: 400px;
@@ -80,6 +81,17 @@ body {
 .header-tab.active {
   color: #00d4aa;
   background: #16213e;
+}
+
+.header-tab.disabled {
+  color: #444;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.header-tab.disabled:hover {
+  color: #444;
+  background: none;
 }
 
 .header-lock-btn {
@@ -515,6 +527,12 @@ label {
 .recovery-status.recovery-success { color: #00d4aa; }
 .recovery-status.recovery-error { color: #e74c3c; }
 .recovery-status.recovery-info { color: #3498db; }
+
+.recovery-warning {
+  font-size: 11px;
+  color: #e04050;
+  margin-top: 6px;
+}
 
 /* ---------------------------------------------------------------------------
    Transactions page

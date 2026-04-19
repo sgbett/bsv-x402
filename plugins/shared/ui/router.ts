@@ -18,6 +18,9 @@ export interface Page {
 const VALID_PAGES = ["home", "payments", "transactions", "settings"] as const;
 export type PageName = (typeof VALID_PAGES)[number];
 
+/** Pages that require an unlocked wallet. */
+const REQUIRES_UNLOCK: ReadonlySet<string> = new Set(["payments", "transactions"]);
+
 function isValidPage(page: string): page is PageName {
   return (VALID_PAGES as readonly string[]).includes(page);
 }
@@ -98,7 +101,10 @@ function renderLockScreen(
     try {
       const newState = await sendMessage<PopupState>("unlock", { password });
       passwordInput.value = "";
-      onUnlock(newState);
+      // Notify popup.ts so it updates its state and re-renders the header
+      window.dispatchEvent(
+        new CustomEvent("x402-state-changed", { detail: newState }),
+      );
     } catch (err) {
       errorEl.textContent = err instanceof Error ? err.message : String(err);
     } finally {
@@ -144,8 +150,9 @@ export function navigate(page: string, container: HTMLElement, state: PopupState
     location.hash = target;
   }
 
-  // Lock screen intercept
-  if (!state.isUnlocked) {
+  // Lock screen intercept — only for pages that require unlock, or home
+  // (Settings stays accessible when locked for recovery purposes)
+  if (!state.isUnlocked && (target === "home" || REQUIRES_UNLOCK.has(target))) {
     renderLockScreen(container, state, (newState) => {
       // Re-navigate after unlock — the page will now render
       navigate(getCurrentPage(), container, newState);

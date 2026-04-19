@@ -8,10 +8,10 @@ import { sendMessage } from "../state";
 // ---------------------------------------------------------------------------
 
 const TABS = [
-  { id: "home", label: "Home" },
-  { id: "payments", label: "Payments" },
-  { id: "transactions", label: "Txns" },
-  { id: "settings", label: "Settings" },
+  { id: "home", label: "Home", requiresUnlock: false },
+  { id: "payments", label: "Payments", requiresUnlock: true },
+  { id: "transactions", label: "Txns", requiresUnlock: true },
+  { id: "settings", label: "Settings", requiresUnlock: false },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -43,10 +43,14 @@ export function renderHeader(
 
   for (const tab of TABS) {
     const btn = document.createElement("button");
-    btn.className = `header-tab${tab.id === activePage ? " active" : ""}`;
+    const disabled = tab.requiresUnlock && !state.isUnlocked;
+    btn.className = `header-tab${tab.id === activePage ? " active" : ""}${disabled ? " disabled" : ""}`;
     btn.dataset.page = tab.id;
     btn.textContent = tab.label;
-    btn.addEventListener("click", () => onNavigate(tab.id));
+    btn.disabled = disabled;
+    if (!disabled) {
+      btn.addEventListener("click", () => onNavigate(tab.id));
+    }
     tabBar.appendChild(btn);
   }
 
@@ -97,14 +101,14 @@ export function updateHeader(
   state: PopupState,
   activePage: string,
 ): void {
-  // Update active tab
+  // Update active tab and disabled state
   const tabs = container.querySelectorAll<HTMLButtonElement>(".header-tab");
   for (const tab of tabs) {
-    if (tab.dataset.page === activePage) {
-      tab.classList.add("active");
-    } else {
-      tab.classList.remove("active");
-    }
+    const tabDef = TABS.find((t) => t.id === tab.dataset.page);
+    const disabled = tabDef?.requiresUnlock && !state.isUnlocked;
+    tab.classList.toggle("active", tab.dataset.page === activePage);
+    tab.classList.toggle("disabled", !!disabled);
+    tab.disabled = !!disabled;
   }
 
   // Update lock button
