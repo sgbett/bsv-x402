@@ -81,13 +81,16 @@ document.addEventListener("DOMContentLoaded", async () => {
     navigate(getCurrentPage(), pageContainer, state);
   }) as EventListener);
 
-  // Listen for balance updates from background (e.g. after UTXO import)
+  // Listen for background events
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "balanceUpdated") {
+    if (message?.type === "balanceUpdated" || message?.type === "walletLocked") {
       fetchState().then((newState) => {
         state = newState;
+        renderHeader(headerEl, state, getCurrentPage(), (page) => {
+          navigate(page, pageContainer, state);
+          updateHeader(headerEl, state, getCurrentPage());
+        });
         navigate(getCurrentPage(), pageContainer, state);
-        updateHeader(headerEl, state, getCurrentPage());
       }).catch(() => {});
     }
   });

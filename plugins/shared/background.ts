@@ -793,6 +793,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'auto-lock' && wallet.isUnlocked()) {
     wallet.lock()
     console.log('x402: wallet auto-locked after idle timeout')
+    chrome.runtime.sendMessage({ type: 'walletLocked' }).catch(() => {})
   }
 })
 
