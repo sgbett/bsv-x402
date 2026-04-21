@@ -79,9 +79,59 @@ export interface Brc121ProofResult {
 /** Custom BRC-121 proof constructor. */
 export type Brc121ProofConstructor = (challenge: Brc121Challenge) => Promise<Brc121ProofResult>
 
+// === PayGateway (BSV-pay / Coinbase v2) types ===
+
+/** A single entry from the PayGateway `accepts` array. */
+export interface PayGatewayAccept {
+  scheme: string
+  network: string
+  /** Satoshi amount as a string (Coinbase v2 convention). */
+  amount: string
+  asset: string
+  /** Locking script hex (not an address). */
+  payTo: string
+  maxTimeoutSeconds: number
+  extra: {
+    /** Pre-built partial transaction template (base64). Optional progressive enhancement. */
+    partialTx?: string
+    /** HMAC-SHA256 of payTo — tamper protection, echoed back untouched. */
+    payToSig: string
+    /** BRC-29 derivation prefix (base64), when wallet-derived. */
+    derivationPrefix?: string
+    /** BRC-29 derivation suffix (base64), when wallet-derived. */
+    derivationSuffix?: string
+  }
+}
+
+/** Parsed PayGateway challenge from the `Payment-Required` header. */
+export interface PayGatewayChallenge {
+  x402Version: number
+  resource: { url: string }
+  accepts: PayGatewayAccept[]
+  /** The BSV entry selected from the accepts array. */
+  selectedAccept: PayGatewayAccept
+}
+
+/** Payment proof sent back to the server in the `Payment-Signature` header. */
+export interface PayGatewayProof {
+  rawtx: string   // hex-encoded raw transaction
+  txid: string
+  beef?: string   // base64-encoded AtomicBEEF (optional)
+}
+
+/** Result from PayGateway proof construction, with abort/broadcast callbacks. */
+export interface PayGatewayProofResult {
+  proof: PayGatewayProof
+  abort?: () => Promise<void>
+  broadcast?: () => Promise<void>
+}
+
+/** Custom PayGateway proof constructor. */
+export type PayGatewayProofConstructor = (challenge: PayGatewayChallenge) => Promise<PayGatewayProofResult>
+
 // === Protocol-agnostic payment request ===
 
-export type PaymentProtocol = 'x402' | 'brc105' | 'brc121'
+export type PaymentProtocol = 'x402' | 'brc105' | 'brc121' | 'paygateway'
 
 export interface PaymentRequest {
   amount: number
@@ -160,6 +210,10 @@ export interface X402Config {
   brc121ProofConstructor?: Brc121ProofConstructor
   /** Wallet for BRC-121 payments (reuses Brc105Wallet interface). */
   brc121Wallet?: Brc105Wallet
+  /** Custom PayGateway proof constructor. */
+  payGatewayProofConstructor?: PayGatewayProofConstructor
+  /** Wallet for PayGateway payments (reuses Brc105Wallet interface — only needs createAction + abortAction). */
+  payGatewayWallet?: Brc105Wallet
   onProofError?: (error: unknown, protocol: PaymentProtocol) => void
   /** Maximum number of retries for network errors during BRC-105 payment (default: 2). */
   maxRetries?: number
