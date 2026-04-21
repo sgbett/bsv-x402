@@ -42,7 +42,14 @@ export async function constructBrc121Proof(
   origin?: string,
 ): Promise<Brc121ProofResult> {
   // Step 1: Get client's identity key
-  const { publicKey: clientIdentityKey } = await wallet.getPublicKey({ identityKey: true })
+  let clientIdentityKey: string
+  try {
+    const r = await wallet.getPublicKey({ identityKey: true })
+    clientIdentityKey = r.publicKey
+  } catch (err) {
+    console.error('[x402] BRC-121 proof: failed to get identity key:', err)
+    throw err
+  }
 
   // Step 2: Generate nonce (derivation prefix) — 8 random bytes → base64
   const nonceBytes = crypto.getRandomValues(new Uint8Array(8))
@@ -54,32 +61,51 @@ export async function constructBrc121Proof(
 
   // Step 4: Derive the payee's public key via BRC-29
   const keyID = `${nonce} ${timeSuffixB64}`
-  const { publicKey: derivedPublicKey } = await wallet.getPublicKey({
-    protocolID: [2, "3241645161d8"],
-    keyID,
-    counterparty: challenge.serverIdentityKey,
-  })
+  let derivedPublicKey: string
+  try {
+    const r = await wallet.getPublicKey({
+      protocolID: [2, "3241645161d8"],
+      keyID,
+      counterparty: challenge.serverIdentityKey,
+    })
+    derivedPublicKey = r.publicKey
+  } catch (err) {
+    console.error('[x402] BRC-121 proof: BRC-29 key derivation failed:', err)
+    throw err
+  }
 
   // Step 5: Build P2PKH locking script
-  const lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
+  let lockingScript: string
+  try {
+    lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
+  } catch (err) {
+    console.error('[x402] BRC-121 proof: P2PKH script generation failed:', err)
+    throw err
+  }
 
   // Step 6: Create the payment transaction
   const description = origin
     ? `Payment for request to ${origin}`
     : "BRC-121 payment"
-  const result = await wallet.createAction({
-    description,
-    outputs: [{
-      satoshis: challenge.satoshis,
-      lockingScript,
-      outputDescription: "BRC-121 payment",
-    }],
-    options: {
-      randomizeOutputs: false,
-      noSend: true,
-      returnTXIDOnly: false,
-    },
-  })
+  let result: Awaited<ReturnType<typeof wallet.createAction>>
+  try {
+    result = await wallet.createAction({
+      description,
+      outputs: [{
+        satoshis: challenge.satoshis,
+        lockingScript,
+        outputDescription: "BRC-121 payment",
+      }],
+      options: {
+        randomizeOutputs: false,
+        noSend: true,
+        returnTXIDOnly: false,
+      },
+    })
+  } catch (err) {
+    console.error(`[x402] BRC-121 proof: createAction failed (${challenge.satoshis} sats):`, err)
+    throw err
+  }
 
   // Step 7: Convert transaction to base64
   // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)

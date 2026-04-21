@@ -74,7 +74,8 @@ export function sendMessage<T = PopupState>(
 export async function fetchState(): Promise<PopupState> {
   try {
     return await sendMessage<PopupState>("getState");
-  } catch {
+  } catch (err) {
+    console.warn('[x402] fetchState failed, using defaults:', err)
     return { ...DEFAULT_STATE };
   }
 }
@@ -98,8 +99,8 @@ export function startPolling(
     try {
       const state = await sendMessage<PopupState>("getState");
       callback(state);
-    } catch {
-      // Ignore — service worker may be restarting
+    } catch (err) {
+      console.warn('[x402] State poll failed:', err)
     }
   }, intervalMs);
 

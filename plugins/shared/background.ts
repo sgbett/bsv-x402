@@ -181,6 +181,7 @@ interface InternalMessage {
     | 'listTransactions'
     | 'adminListOutputs'
     | 'adminAbortNosend'
+    | 'adminArcPrune'
     | 'getRootKeyPreview'
     | 'adminExportWallet'
     | 'adminImportWallet'
@@ -392,7 +393,7 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
         }
       })
 
-      return { totalOutputs: outputsResult.totalOutputs, outputs: enriched }
+      return { totalOutputs: outputsResult.totalOutputs, outputs: enriched, basket: params.basket ?? 'default' }
     }
 
     case 'adminAbortNosend': {
@@ -409,6 +410,65 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
       const walletState = await wallet.getWalletState()
       return { aborted: result.totalActions, balance: walletState.balance }
+    }
+
+    case 'adminArcPrune': {
+      if (!wallet.isUnlocked()) throw new Error('Wallet is locked')
+      const arcBackend = wallet.getBackend()
+      const ARC_BASE = 'https://arcade.gorillapool.io'
+
+      // List all spendable outputs from the default basket
+      const { outputs: arcOutputs } = await arcBackend.call('listOutputs', {
+        basket: 'default',
+        limit: 10000,
+      }, 'self') as { totalOutputs: number; outputs: Array<{ outpoint: string; satoshis: number; spendable: boolean }> }
+
+      const spendable = arcOutputs.filter((o) => o.spendable)
+
+      // Group by txid
+      const byTxid = new Map<string, string[]>()
+      for (const o of spendable) {
+        const dotIdx = o.outpoint.lastIndexOf('.')
+        if (dotIdx === -1) continue
+        const txid = o.outpoint.slice(0, dotIdx)
+        const arr = byTxid.get(txid) ?? []
+        arr.push(o.outpoint)
+        byTxid.set(txid, arr)
+      }
+
+      let pruned = 0
+      let checked = 0
+      const errors: string[] = []
+
+      for (const [txid, outpoints] of byTxid) {
+        checked++
+        try {
+          const res = await fetch(`${ARC_BASE}/v1/tx/${txid}`)
+          if (res.status === 404) {
+            // ARC has pruned this tx — all outputs spent
+            for (const outpoint of outpoints) {
+              try {
+                // Move to arc404 basket so createAction skips them
+                await arcBackend.call('relinquishOutput', {
+                  basket: 'default',
+                  output: outpoint,
+                }, 'self')
+                pruned++
+              } catch (e) {
+                errors.push(`relinquish ${outpoint}: ${e instanceof Error ? e.message : String(e)}`)
+              }
+            }
+            console.log(`[x402] adminArcPrune: txid ${txid.slice(0, 12)}... → 404, relinquished ${outpoints.length} outputs`)
+          }
+          // 200 = tx still live, skip
+        } catch (e) {
+          errors.push(`fetch ${txid.slice(0, 12)}...: ${e instanceof Error ? e.message : String(e)}`)
+        }
+      }
+
+      console.log(`[x402] adminArcPrune: checked ${checked} txids, relinquished ${pruned} outputs`)
+      chrome.runtime.sendMessage({ type: 'balanceUpdated' }).catch(() => {})
+      return { checked, pruned, errors: errors.length > 0 ? errors : undefined }
     }
 
     case 'getRootKeyPreview': {
@@ -430,8 +490,8 @@ async function handleInternalMessage(message: InternalMessage): Promise<Record<s
       let chainTracksData: Record<string, unknown[]> | null = null
       try {
         chainTracksData = await exportIndexedDB(chainTracksDbName)
-      } catch {
-        // Chaintracks DB may not exist yet — not critical
+      } catch (err) {
+        console.warn(`[x402] adminExportWallet: chaintracks DB export skipped:`, err)
       }
       const backup = {
         version: 1,

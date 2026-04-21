@@ -213,45 +213,77 @@ export async function constructBrc105Proof(
   origin?: string,
 ): Promise<Brc105ProofResult> {
   // Step 1: Get client's identity key (for inclusion in proof)
-  const { publicKey: clientIdentityKey } = await wallet.getPublicKey({ identityKey: true })
+  let clientIdentityKey: string
+  try {
+    const r = await wallet.getPublicKey({ identityKey: true })
+    clientIdentityKey = r.publicKey
+  } catch (err) {
+    console.error('[x402] BRC-105 proof: failed to get identity key:', err)
+    throw err
+  }
 
   // Step 2: Generate derivation suffix
-  const derivationSuffix = await createDerivationSuffix(wallet)
+  let derivationSuffix: string
+  try {
+    derivationSuffix = await createDerivationSuffix(wallet)
+  } catch (err) {
+    console.error('[x402] BRC-105 proof: failed to generate derivation suffix:', err)
+    throw err
+  }
 
   // Step 3: Derive the payee's public key via BRC-29
   // BRC-105 requires mutual authentication — always use the server's identity key
   const keyID = `${challenge.derivationPrefix} ${derivationSuffix}`
-  const { publicKey: derivedPublicKey } = await wallet.getPublicKey({
-    protocolID: [2, "3241645161d8"],
-    keyID,
-    counterparty: challenge.serverIdentityKey,
-  })
+  let derivedPublicKey: string
+  try {
+    const r = await wallet.getPublicKey({
+      protocolID: [2, "3241645161d8"],
+      keyID,
+      counterparty: challenge.serverIdentityKey,
+    })
+    derivedPublicKey = r.publicKey
+  } catch (err) {
+    console.error('[x402] BRC-105 proof: BRC-29 key derivation failed:', err)
+    throw err
+  }
 
   // Step 4: Build P2PKH locking script
-  const lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
+  let lockingScript: string
+  try {
+    lockingScript = await pubkeyToP2PKHLockingScript(derivedPublicKey)
+  } catch (err) {
+    console.error('[x402] BRC-105 proof: P2PKH script generation failed:', err)
+    throw err
+  }
 
   // Step 5: Create the payment transaction
   const description = origin
     ? `Payment for request to ${origin}`
     : "BRC-105 payment"
-  const result = await wallet.createAction({
-    description,
-    outputs: [{
-      satoshis: challenge.satoshisRequired,
-      lockingScript,
-      outputDescription: "HTTP request payment",
-      customInstructions: JSON.stringify({
-        derivationPrefix: challenge.derivationPrefix,
-        derivationSuffix,
-        payee: challenge.serverIdentityKey,
-      }),
-    }],
-    options: {
-      returnTXIDOnly: false,
-      noSend: true,
-      randomizeOutputs: false,
-    },
-  })
+  let result: Awaited<ReturnType<typeof wallet.createAction>>
+  try {
+    result = await wallet.createAction({
+      description,
+      outputs: [{
+        satoshis: challenge.satoshisRequired,
+        lockingScript,
+        outputDescription: "HTTP request payment",
+        customInstructions: JSON.stringify({
+          derivationPrefix: challenge.derivationPrefix,
+          derivationSuffix,
+          payee: challenge.serverIdentityKey,
+        }),
+      }],
+      options: {
+        returnTXIDOnly: false,
+        noSend: true,
+        randomizeOutputs: false,
+      },
+    })
+  } catch (err) {
+    console.error(`[x402] BRC-105 proof: createAction failed (${challenge.satoshisRequired} sats):`, err)
+    throw err
+  }
 
   // Step 6: Convert transaction to base64
   // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)

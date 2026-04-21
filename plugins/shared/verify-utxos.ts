@@ -35,10 +35,10 @@ export async function verifyUtxos(
 
   for (const output of spendable) {
     const dotIdx = output.outpoint.lastIndexOf('.')
-    if (dotIdx === -1) { result.failed++; continue }
+    if (dotIdx === -1) { console.warn(`[x402] verifyUtxos: malformed outpoint (no dot): ${output.outpoint}`); result.failed++; continue }
     const txid = output.outpoint.slice(0, dotIdx)
     const vout = parseInt(output.outpoint.slice(dotIdx + 1), 10)
-    if (isNaN(vout)) { result.failed++; continue }
+    if (isNaN(vout)) { console.warn(`[x402] verifyUtxos: malformed vout in outpoint: ${output.outpoint}`); result.failed++; continue }
 
     // Retry loop with exponential backoff on rate limits
     let checked = false
@@ -54,7 +54,8 @@ export async function verifyUtxos(
               output: output.outpoint,
             }, 'self')
             result.relinquished++
-          } catch {
+          } catch (err) {
+            console.warn(`[x402] verifyUtxos: relinquishOutput failed for ${output.outpoint}:`, err)
             result.failed++
           }
         }

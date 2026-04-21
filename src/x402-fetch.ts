@@ -265,8 +265,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       let challenge: Challenge
       try {
         challenge = parseChallenge(challengeHeader)
-      } catch {
-        // Malformed challenge from untrusted server — treat as non-payable
+      } catch (err) {
+        console.warn('[x402] Malformed X402-Challenge header, treating as non-payable:', err)
         return response
       }
 
@@ -296,8 +296,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
       let brc105Challenge: Brc105Challenge
       try {
         brc105Challenge = parseBrc105Challenge(response)
-      } catch {
-        // Malformed or unsupported version — treat as non-payable
+      } catch (err) {
+        console.warn('[x402] Malformed BRC-105 challenge headers, treating as non-payable:', err)
         return response
       }
 
@@ -343,7 +343,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
           retryResponse = await fetch(input, { ...init, headers: proofHeaders(proof) })
           networkError = false
           break
-        } catch {
+        } catch (err) {
+          console.warn(`[x402] Network error on retry attempt ${attempt + 1}/${maxRetries + 1}:`, err)
           networkError = true
         }
       }
@@ -423,8 +424,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
     let brc121Challenge: Brc121Challenge | null
     try {
       brc121Challenge = parseBrc121Challenge(response)
-    } catch {
-      // Malformed challenge — treat as non-payable
+    } catch (err) {
+      console.warn('[x402] Malformed BRC-121 challenge headers, treating as non-payable:', err)
       return response
     }
 
@@ -480,7 +481,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
           retryResponse = await fetch(input, { ...init, headers: proofHeaders(proof) })
           networkError = false
           break
-        } catch {
+        } catch (err) {
+          console.warn(`[x402] Network error on retry attempt ${attempt + 1}/${maxRetries + 1}:`, err)
           networkError = true
         }
       }

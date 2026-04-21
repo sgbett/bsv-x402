@@ -83,7 +83,12 @@ export class BuiltInWalletBackend implements WalletBackend {
       throw new Error(`Wallet does not implement method: ${method}`)
     }
 
-    return fn.call(this.wallet, params ?? {})
+    try {
+      return await fn.call(this.wallet, params ?? {})
+    } catch (err) {
+      console.error(`[x402] wallet.${method} failed:`, err)
+      throw err
+    }
   }
 
   async isAuthenticated(): Promise<boolean> {
@@ -91,7 +96,8 @@ export class BuiltInWalletBackend implements WalletBackend {
     try {
       const result = await this.wallet.isAuthenticated({})
       return result.authenticated
-    } catch {
+    } catch (err) {
+      console.warn('[x402] isAuthenticated check failed:', err)
       return false
     }
   }
