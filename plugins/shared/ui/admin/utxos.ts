@@ -14,11 +14,13 @@ interface OutputRecord {
   txStatus: string
   txDescription: string
   txIsOutgoing: boolean
+  basket: string
 }
 
 interface ListOutputsResponse {
   totalOutputs: number
   outputs: OutputRecord[]
+  basket: string
 }
 
 // Message helper — same pattern as popup.ts
@@ -98,6 +100,7 @@ function renderTable() {
       case 'spendable': cmp = (a.spendable ? 1 : 0) - (b.spendable ? 1 : 0); break
       case 'outpoint': cmp = a.outpoint.localeCompare(b.outpoint); break
       case 'txStatus': cmp = a.txStatus.localeCompare(b.txStatus); break
+      case 'basket': cmp = a.basket.localeCompare(b.basket); break
       case 'tags': cmp = (a.tags?.join(',') ?? '').localeCompare(b.tags?.join(',') ?? ''); break
       default: cmp = 0
     }
@@ -148,6 +151,7 @@ function renderTable() {
       <td class="sats">${formatSats(output.satoshis)}</td>
       <td class="${output.spendable ? 'spendable-yes' : 'spendable-no'}">${output.spendable ? 'yes' : 'no'}</td>
       <td style="color: ${statusColour}">${output.txStatus}</td>
+      <td class="basket">${output.basket}</td>
       <td class="tx-desc">${output.txDescription || ''}</td>
       <td class="tags">${(output.tags ?? []).map(t => `<span class="tag">${t}</span>`).join('')}</td>
     `
@@ -172,7 +176,7 @@ async function loadOutputs() {
 
     const response = await sendMessage({ type: 'adminListOutputs', payload: params })
     const data = response as ListOutputsResponse
-    allOutputs = data.outputs ?? []
+    allOutputs = (data.outputs ?? []).map(o => ({ ...o, basket: o.basket ?? data.basket ?? '?' }))
     subtitleEl.textContent = `Wallet outputs — ${basket || 'all baskets'}`
 
     // Populate status filter from actual data
@@ -232,6 +236,39 @@ abortBtn.addEventListener('click', async () => {
   } finally {
     abortBtn.disabled = false
     abortBtn.textContent = 'Abort nosend txs'
+  }
+})
+
+// ARC prune — check unique txids against ARC, relinquish 404'd outputs
+const arcPruneBtn = document.getElementById('arc-prune-btn') as HTMLButtonElement
+arcPruneBtn.addEventListener('click', async () => {
+  const spendable = allOutputs.filter(o => o.spendable)
+  const uniqueTxids = new Set(spendable.map(o => parseOutpoint(o.outpoint).txid))
+  if (uniqueTxids.size === 0) {
+    statusEl.textContent = 'No spendable outputs to check'
+    statusEl.className = 'status'
+    return
+  }
+  if (!confirm(`Check ${uniqueTxids.size} unique txids against ARC and relinquish outputs from pruned (404) transactions?`)) return
+
+  arcPruneBtn.disabled = true
+  arcPruneBtn.textContent = 'Checking ARC...'
+  statusEl.textContent = `Checking ${uniqueTxids.size} txids against ARC...`
+  statusEl.className = 'status'
+
+  try {
+    const result = await sendMessage({ type: 'adminArcPrune' }) as { checked: number; pruned: number; errors?: string[] }
+    let msg = `ARC prune: checked ${result.checked} txids, relinquished ${result.pruned} outputs`
+    if (result.errors?.length) msg += ` (${result.errors.length} errors)`
+    statusEl.textContent = msg
+    statusEl.className = 'status'
+    if (result.pruned > 0) await loadOutputs()
+  } catch (err) {
+    statusEl.textContent = err instanceof Error ? err.message : String(err)
+    statusEl.className = 'status error'
+  } finally {
+    arcPruneBtn.disabled = false
+    arcPruneBtn.textContent = 'ARC prune'
   }
 })
 
