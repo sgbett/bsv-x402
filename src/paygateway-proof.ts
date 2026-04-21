@@ -1,16 +1,5 @@
 import type { PayGatewayChallenge, PayGatewayProof, PayGatewayProofResult, Brc105Wallet } from "./types"
-
-// === Byte encoding helpers ===
-
-function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("")
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ""
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
+import { bytesToHex, bytesToBase64 } from "./bytes"
 
 // === Main proof constructor ===
 

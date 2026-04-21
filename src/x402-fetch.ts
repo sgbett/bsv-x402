@@ -14,27 +14,9 @@ import type {
   X402Config,
 } from "./types"
 
+import { bytesToBase64, numberArrayToBase64, hexToBytes } from "./bytes"
+
 // === Proof construction via BRC-100 wallet (window.CWI) ===
-
-// Base64/hex helpers (inlined to avoid cross-module dependency on brc105-proof)
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ""
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-
-function numberArrayToBase64(arr: number[]): string {
-  return bytesToBase64(new Uint8Array(arr))
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) throw new Error("Hex string must have even length")
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
-  }
-  return bytes
-}
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
