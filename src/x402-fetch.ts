@@ -3,35 +3,20 @@ import { constructBrc105Proof } from "./brc105-proof"
 import { parseBrc121Challenge } from "./brc121-challenge"
 import { constructBrc121Proof } from "./brc121-proof"
 import { parseChallenge } from "./challenge"
+import { parsePayGatewayChallenge } from "./paygateway-challenge"
+import { constructPayGatewayProof } from "./paygateway-proof"
 import type {
   Brc105Challenge,
   Brc121Challenge,
   Challenge,
+  PayGatewayChallenge,
   Proof,
   X402Config,
 } from "./types"
 
+import { bytesToBase64, numberArrayToBase64, hexToBytes } from "./bytes"
+
 // === Proof construction via BRC-100 wallet (window.CWI) ===
-
-// Base64/hex helpers (inlined to avoid cross-module dependency on brc105-proof)
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = ""
-  for (const b of bytes) binary += String.fromCharCode(b)
-  return btoa(binary)
-}
-
-function numberArrayToBase64(arr: number[]): string {
-  return bytesToBase64(new Uint8Array(arr))
-}
-
-function hexToBytes(hex: string): Uint8Array {
-  if (hex.length % 2 !== 0) throw new Error("Hex string must have even length")
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
-  }
-  return bytes
-}
 
 const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
@@ -179,6 +164,8 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
   const brc105Wallet = config.brc105Wallet
   const brc121ProofConstructor = config.brc121ProofConstructor
   const brc121Wallet = config.brc121Wallet
+  const payGatewayProofConstructor = config.payGatewayProofConstructor
+  const payGatewayWallet = config.payGatewayWallet
   const maxRetries = config.maxRetries ?? 2
   const ackWallet = config.ackWallet
   const serverIdentityKey = config.serverIdentityKey
@@ -549,6 +536,149 @@ export function createX402Fetch(config: X402Config = {}): X402FetchFn {
         try {
           await freshAbort()
           console.warn('[x402] Server rejected fresh BRC-121 payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] freshAbort failed during double rejection:', err)
+        }
+      }
+
+      await processPendingBeefs(freshResponse)
+      return freshResponse
+    }
+
+    // PayGateway protocol: Payment-Required header (x402 v2 / Coinbase format)
+    let payGatewayChallenge: PayGatewayChallenge | null
+    try {
+      payGatewayChallenge = parsePayGatewayChallenge(response)
+    } catch (err) {
+      console.warn('[x402] Malformed PayGateway challenge, treating as non-payable:', err)
+      return response
+    }
+
+    if (payGatewayChallenge) {
+      // No PayGateway wallet or proof constructor configured — pass through silently
+      if (!payGatewayProofConstructor && !payGatewayWallet) {
+        await processPendingBeefs(response)
+        return response
+      }
+
+      // Helper: build proof using whichever constructor is configured
+      const buildProof = async () => {
+        if (payGatewayProofConstructor) {
+          return payGatewayProofConstructor(payGatewayChallenge!)
+        }
+        return constructPayGatewayProof(payGatewayChallenge!, payGatewayWallet!, origin)
+      }
+
+      // Helper: build Payment-Signature header from a proof result
+      const proofHeaders = (proof: import("./types").PayGatewayProof, challenge: PayGatewayChallenge) => {
+        const h = new Headers(init?.headers)
+        const signaturePayload = {
+          x402Version: challenge.x402Version,
+          accepted: challenge.selectedAccept,
+          payload: {
+            rawtx: proof.rawtx,
+            txid: proof.txid,
+            ...(proof.beef ? { beef: proof.beef } : {}),
+          },
+        }
+        h.set("Payment-Signature", btoa(JSON.stringify(signaturePayload)))
+        injectAckHeader(h)
+        return h
+      }
+
+      let proof: import("./types").PayGatewayProof
+      let abort: (() => Promise<void>) | undefined
+      let broadcast: (() => Promise<void>) | undefined
+      try {
+        const result = await buildProof()
+        proof = result.proof
+        abort = result.abort
+        broadcast = result.broadcast
+      } catch (err) {
+        console.error("[x402] Proof construction failed (paygateway):", err)
+        config.onProofError?.(err, "paygateway")
+        return response
+      }
+
+      // --- Network retry loop: resend the same signed tx ---
+      let retryResponse: Response | undefined
+      let networkError = false
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+          await delay(1000 * 2 ** (attempt - 1))
+        }
+        try {
+          retryResponse = await fetch(input, { ...init, headers: proofHeaders(proof, payGatewayChallenge) })
+          networkError = false
+          break
+        } catch (err) {
+          console.warn(`[x402] Network error on retry attempt ${attempt + 1}/${maxRetries + 1}:`, err)
+          networkError = true
+        }
+      }
+
+      // Network error: all retries exhausted — do NOT abort (tx may be on-chain)
+      if (networkError) {
+        throw new Error(
+          "[x402] Payment state unknown: network error after " +
+          `${maxRetries + 1} attempts. The transaction may have been broadcast — ` +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      // Success
+      if (retryResponse!.ok) {
+        if (broadcast) {
+          broadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
+        await processPendingBeefs(retryResponse!)
+        return retryResponse!
+      }
+
+      // --- Server rejection: abort, then single fresh retry ---
+      if (abort) {
+        try {
+          await abort()
+          console.warn('[x402] Server rejected PayGateway payment, UTXOs released via abortAction')
+        } catch (err) {
+          console.warn('[x402] abortAction failed during server rejection:', err)
+        }
+      }
+
+      let freshProof: import("./types").PayGatewayProof
+      let freshAbort: (() => Promise<void>) | undefined
+      let freshBroadcast: (() => Promise<void>) | undefined
+      try {
+        const result = await buildProof()
+        freshProof = result.proof
+        freshAbort = result.abort
+        freshBroadcast = result.broadcast
+      } catch (err) {
+        console.error("[x402] Fresh proof construction failed (paygateway):", err)
+        config.onProofError?.(err, "paygateway")
+        return retryResponse!
+      }
+
+      let freshResponse: Response
+      try {
+        freshResponse = await fetch(input, { ...init, headers: proofHeaders(freshProof, payGatewayChallenge) })
+      } catch {
+        // Network error on fresh attempt — do NOT abort (tx may be on-chain)
+        throw new Error(
+          "[x402] Payment state unknown: network error on fresh retry. " +
+          "The transaction may have been broadcast — " +
+          "do not retry with a new transaction without checking on-chain state.",
+        )
+      }
+
+      if (freshResponse.ok) {
+        if (freshBroadcast) {
+          freshBroadcast().catch(err => console.warn('[x402] broadcast failed:', err))
+        }
+      } else if (freshAbort) {
+        try {
+          await freshAbort()
+          console.warn('[x402] Server rejected fresh PayGateway payment, UTXOs released via abortAction')
         } catch (err) {
           console.warn('[x402] freshAbort failed during double rejection:', err)
         }

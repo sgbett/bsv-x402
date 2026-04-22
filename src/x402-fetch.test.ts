@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createX402Fetch, payeeAddressToLockingScript, verifyBase58Checksum } from "./x402-fetch"
-import type { Brc105Challenge, Brc105ProofResult, Brc121Challenge, Brc121ProofResult } from "./types"
+import type { Brc105Challenge, Brc105ProofResult, Brc121Challenge, Brc121ProofResult, PayGatewayChallenge, PayGatewayProofResult } from "./types"
 
 function make402Response(amount: number = 1000) {
   return new Response("Payment Required", {
@@ -1892,5 +1892,623 @@ describe("createX402Fetch — BRC-121", () => {
     expect(broadcast).not.toHaveBeenCalled()
     // Fresh broadcast called on success
     expect(freshBroadcast).toHaveBeenCalledOnce()
+  })
+})
+
+// === PayGateway tests ===
+
+function makePayGatewayAccept(overrides: Partial<{
+  amount: string
+  payTo: string
+  payToSig: string
+  derivationPrefix: string
+  derivationSuffix: string
+}> = {}) {
+  return {
+    scheme: "exact",
+    network: "bsv:mainnet",
+    amount: overrides.amount ?? "1000",
+    asset: "BSV",
+    payTo: overrides.payTo ?? "76a91489abcdefabbaabbaabbaabbaabbaabbaabbaabba88ac",
+    maxTimeoutSeconds: 60,
+    extra: {
+      payToSig: overrides.payToSig ?? "hmac-sig-value",
+      ...(overrides.derivationPrefix ? { derivationPrefix: overrides.derivationPrefix } : {}),
+      ...(overrides.derivationSuffix ? { derivationSuffix: overrides.derivationSuffix } : {}),
+    },
+  }
+}
+
+function makePayGatewayChallenge(overrides: Partial<{ amount: string; payToSig: string }> = {}) {
+  const accept = makePayGatewayAccept(overrides)
+  const payload = {
+    x402Version: 2,
+    resource: { url: "/api/expensive" },
+    accepts: [accept],
+  }
+  return btoa(JSON.stringify(payload))
+}
+
+function makePayGateway402(overrides: Partial<{ amount: string; payToSig: string }> = {}) {
+  return new Response("Payment Required", {
+    status: 402,
+    headers: {
+      "Payment-Required": makePayGatewayChallenge(overrides),
+    },
+  })
+}
+
+function mockPayGatewayProofConstructor(): (challenge: PayGatewayChallenge) => Promise<PayGatewayProofResult> {
+  return vi.fn(async () => ({
+    proof: {
+      rawtx: "deadbeef",
+      txid: "paygateway-mock-txid",
+      beef: btoa("mock-beef"),
+    },
+    abort: vi.fn(),
+    broadcast: vi.fn().mockResolvedValue(undefined),
+  }))
+}
+
+describe("createX402Fetch — PayGateway", () => {
+  let originalFetch: typeof globalThis.fetch
+
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+  })
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+  })
+
+  it("detects PayGateway 402 and retries with Payment-Signature header", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const proofConstructor = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: proofConstructor })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(200)
+    expect(proofConstructor).toHaveBeenCalledOnce()
+
+    // Verify the retry request has Payment-Signature header
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const sigHeader = retryHeaders.get("Payment-Signature")
+    expect(sigHeader).toBeTruthy()
+  })
+
+  it("Payment-Signature header is base64 JSON with correct structure", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const proofConstructor = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: proofConstructor })
+
+    await f("https://api.example.com/data")
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const sigHeader = retryHeaders.get("Payment-Signature")!
+
+    // Decode base64 → JSON
+    const decoded = JSON.parse(atob(sigHeader))
+    expect(decoded).toHaveProperty("x402Version", 2)
+    expect(decoded).toHaveProperty("accepted")
+    expect(decoded).toHaveProperty("payload")
+    expect(decoded.payload).toHaveProperty("rawtx", "deadbeef")
+    expect(decoded.payload).toHaveProperty("txid", "paygateway-mock-txid")
+    expect(decoded.payload).toHaveProperty("beef", btoa("mock-beef"))
+  })
+
+  it("accepted block echoed back includes payToSig", async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402({ payToSig: "server-hmac-123" }))
+      .mockResolvedValueOnce(make200Response())
+
+    const proofConstructor = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: proofConstructor })
+
+    await f("https://api.example.com/data")
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    const decoded = JSON.parse(atob(retryHeaders.get("Payment-Signature")!))
+
+    expect(decoded.accepted.extra.payToSig).toBe("server-hmac-123")
+    expect(decoded.accepted.payTo).toBe("76a91489abcdefabbaabbaabbaabbaabbaabbaabbaabba88ac")
+    expect(decoded.accepted.amount).toBe("1000")
+    expect(decoded.accepted.network).toBe("bsv:mainnet")
+  })
+
+  it("passes through when no PayGateway wallet or proof constructor configured", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makePayGateway402())
+    const f = createX402Fetch()
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+  })
+
+  it("returns original 402 when proof construction fails", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makePayGateway402())
+
+    const failingProof = vi.fn().mockRejectedValue(new Error("Wallet declined"))
+    const f = createX402Fetch({ payGatewayProofConstructor: failingProof })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(failingProof).toHaveBeenCalledOnce()
+  })
+
+  it("calls onProofError with 'paygateway' on failure", async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(makePayGateway402())
+
+    const error = new Error("No funds")
+    const onProofError = vi.fn()
+    const f = createX402Fetch({
+      payGatewayProofConstructor: vi.fn().mockRejectedValue(error),
+      onProofError,
+    })
+
+    await f("https://api.example.com/data")
+    expect(onProofError).toHaveBeenCalledOnce()
+    expect(onProofError).toHaveBeenCalledWith(error, "paygateway")
+  })
+
+  it("X402-Challenge takes priority over PayGateway when both present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "X402-Challenge": JSON.stringify({
+          nonce: "test-nonce",
+          payee: "1TestAddr",
+          amount: 1000,
+          network: "mainnet",
+        }),
+        "Payment-Required": makePayGatewayChallenge(),
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const customProof = vi.fn().mockResolvedValue({ txid: "custom-txid", beef: btoa("mock-tx") })
+    const payGatewayProof = mockPayGatewayProofConstructor()
+
+    const f = createX402Fetch({
+      proofConstructor: customProof,
+      payGatewayProofConstructor: payGatewayProof,
+    })
+
+    await f("https://api.example.com/data")
+
+    expect(customProof).toHaveBeenCalledOnce()
+    expect(payGatewayProof).not.toHaveBeenCalled()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("X402-Proof")).toBeTruthy()
+    expect(retryHeaders.get("Payment-Signature")).toBeNull()
+  })
+
+  it("BRC-105 takes priority over PayGateway when both present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "x-bsv-payment-version": "1.0",
+        "x-bsv-payment-satoshis-required": "1000",
+        "x-bsv-auth-identity-key": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "x-bsv-payment-derivation-prefix": "prefix",
+        "Payment-Required": makePayGatewayChallenge(),
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const brc105Proof = mockBrc105ProofConstructor()
+    const payGatewayProof = mockPayGatewayProofConstructor()
+
+    const f = createX402Fetch({
+      brc105ProofConstructor: brc105Proof,
+      payGatewayProofConstructor: payGatewayProof,
+    })
+
+    await f("https://api.example.com/data")
+
+    expect(brc105Proof).toHaveBeenCalledOnce()
+    expect(payGatewayProof).not.toHaveBeenCalled()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("x-bsv-payment")).toBeTruthy()
+    expect(retryHeaders.get("Payment-Signature")).toBeNull()
+  })
+
+  it("BRC-121 takes priority over PayGateway when both present", async () => {
+    const bothHeaders = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "x-bsv-sats": "1000",
+        "x-bsv-server": "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798",
+        "Payment-Required": makePayGatewayChallenge(),
+      },
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(bothHeaders)
+      .mockResolvedValueOnce(make200Response())
+
+    const brc121Proof = mockBrc121ProofConstructor()
+    const payGatewayProof = mockPayGatewayProofConstructor()
+
+    const f = createX402Fetch({
+      brc121ProofConstructor: brc121Proof,
+      payGatewayProofConstructor: payGatewayProof,
+    })
+
+    await f("https://api.example.com/data")
+
+    expect(brc121Proof).toHaveBeenCalledOnce()
+    expect(payGatewayProof).not.toHaveBeenCalled()
+
+    const retryCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[1]
+    const retryHeaders = retryCall[1]?.headers as Headers
+    expect(retryHeaders.get("x-bsv-beef")).toBeTruthy()
+    expect(retryHeaders.get("Payment-Signature")).toBeNull()
+  })
+
+  it("calls broadcast on server 200 acceptance", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const payGatewayProof = vi.fn().mockResolvedValue({
+      proof: { rawtx: "deadbeef", txid: "pg-txid" },
+      abort: vi.fn(),
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("does not call broadcast on server error", async () => {
+    const broadcast = vi.fn()
+    const abort = vi.fn()
+    let callCount = 0
+    const payGatewayProof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: { rawtx: "deadbeef", txid: "txid-" + callCount },
+        abort,
+        broadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(new Response("Bad Request", { status: 400 }))
+      .mockResolvedValueOnce(new Response("Bad Request Again", { status: 400 }))
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(400)
+    expect(broadcast).not.toHaveBeenCalled()
+    expect(abort).toHaveBeenCalled()
+  })
+
+  it("calls abort on server rejection, then fresh retry", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const payGatewayProof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          rawtx: callCount === 1 ? "original" : "fresh",
+          txid: callCount === 1 ? "original-txid" : "fresh-txid",
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(abort).toHaveBeenCalledOnce()
+    expect(freshAbort).not.toHaveBeenCalled()
+    expect(payGatewayProof).toHaveBeenCalledTimes(2)
+  })
+
+  it("network retry loop with exponential backoff", async () => {
+    const payGatewayProof = vi.fn().mockResolvedValue({
+      proof: { rawtx: "deadbeef", txid: "pg-retry-txid" },
+      abort: vi.fn(),
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof, maxRetries: 1 })
+
+    vi.useFakeTimers()
+    const promise = f("https://api.example.com/data")
+    await vi.advanceTimersByTimeAsync(1000)
+    const res = await promise
+    vi.useRealTimers()
+
+    expect(res.status).toBe(200)
+    expect(payGatewayProof).toHaveBeenCalledOnce()
+
+    // Same Payment-Signature header reused on both attempts
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const firstRetrySig = (fetchMock.mock.calls[1][1]?.headers as Headers).get("Payment-Signature")
+    const secondRetrySig = (fetchMock.mock.calls[2][1]?.headers as Headers).get("Payment-Signature")
+    expect(firstRetrySig).toBe(secondRetrySig)
+  })
+
+  it("throws 'payment state unknown' when all network retries exhausted", async () => {
+    const abort = vi.fn()
+    const payGatewayProof = vi.fn().mockResolvedValue({
+      proof: { rawtx: "deadbeef", txid: "pg-fail-txid" },
+      abort,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockRejectedValue(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof, maxRetries: 0 })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Payment state unknown")
+    expect(abort).not.toHaveBeenCalled()
+  })
+
+  it("processes pendingBeefs on successful PayGateway response", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    const payGatewayProof = mockPayGatewayProofConstructor()
+
+    // 402 → proof → 200 with pendingBeefs
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: "pg-ack" })]))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey, payGatewayProofConstructor: payGatewayProof })
+
+    const res1 = await f("https://api.example.com/paid")
+    expect(res1.status).toBe(200)
+    expect(ackWallet.internalizeAction).toHaveBeenCalledTimes(1)
+
+    // Second call: should carry x-bsv-ack
+    await f("https://api.example.com/next")
+
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const nextHeaders = fetchMock.mock.calls[2][1]?.headers as Headers
+    expect(nextHeaders.get("x-bsv-ack")).toBe("pg-ack")
+  })
+
+  it("injects ack headers on PayGateway retry requests", async () => {
+    const ackWallet = { internalizeAction: vi.fn().mockResolvedValue({ accepted: true }) }
+    const serverIdentityKey = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    const payGatewayProof = mockPayGatewayProofConstructor()
+
+    // First call: 200 with pendingBeefs (primes the ack)
+    // Second call: 402 PayGateway → retry should carry ack header
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(make200WithPendingBeefs([makePendingBeef({ txid: "pg-pre-ack" })]))
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ ackWallet, serverIdentityKey, payGatewayProofConstructor: payGatewayProof })
+
+    await f("https://api.example.com/first")
+    await f("https://api.example.com/second")
+
+    // The second fetch (index 1) is the initial 402 — the ack is on the initial request
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>
+    const secondInitialHeaders = fetchMock.mock.calls[1][1]?.headers as Headers
+    expect(secondInitialHeaders.get("x-bsv-ack")).toBe("pg-pre-ack")
+  })
+
+  it("malformed Payment-Required header logs warning and passes through", async () => {
+    // A Payment-Required that is valid base64 + JSON but x402Version !== 2
+    // parsePayGatewayChallenge returns null → falls through to "neither protocol" path
+    const response402 = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "Payment-Required": btoa(JSON.stringify({ x402Version: 1, accepts: [] })),
+      },
+    })
+
+    globalThis.fetch = vi.fn().mockResolvedValue(response402)
+    const payGatewayProof = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(payGatewayProof).not.toHaveBeenCalled()
+  })
+
+  it("no Payment-Required header falls through to 'neither protocol' path", async () => {
+    // 402 with no recognised protocol headers at all
+    const bare402 = new Response("Payment Required", { status: 402 })
+    globalThis.fetch = vi.fn().mockResolvedValue(bare402)
+
+    const payGatewayProof = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(payGatewayProof).not.toHaveBeenCalled()
+  })
+
+  it("returns response even when broadcast throws", async () => {
+    const broadcast = vi.fn().mockRejectedValue(new Error("ARC unavailable"))
+    const payGatewayProof = vi.fn().mockResolvedValue({
+      proof: { rawtx: "deadbeef", txid: "pg-err-txid" },
+      broadcast,
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).toHaveBeenCalledOnce()
+  })
+
+  it("handles undefined broadcast gracefully", async () => {
+    const payGatewayProof = vi.fn().mockResolvedValue({
+      proof: { rawtx: "deadbeef", txid: "pg-nobc-txid" },
+      // no broadcast
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+  })
+
+  it("calls fresh broadcast on server rejection then fresh retry success", async () => {
+    const broadcast = vi.fn().mockResolvedValue(undefined)
+    const freshBroadcast = vi.fn().mockResolvedValue(undefined)
+    let callCount = 0
+    const payGatewayProof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          rawtx: callCount === 1 ? "original" : "fresh",
+          txid: "txid-" + callCount,
+        },
+        abort: vi.fn(),
+        broadcast: callCount === 1 ? broadcast : freshBroadcast,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockResolvedValueOnce(make200Response())
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(200)
+    expect(broadcast).not.toHaveBeenCalled()
+    expect(freshBroadcast).toHaveBeenCalledOnce()
+  })
+
+  it("throws unknown state when fresh retry gets network error after server rejection", async () => {
+    const abort = vi.fn()
+    const freshAbort = vi.fn()
+    let callCount = 0
+    const payGatewayProof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          rawtx: "tx-" + callCount,
+          txid: "txid-" + callCount,
+        },
+        abort: callCount === 1 ? abort : freshAbort,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(new Response("Server Error", { status: 500 }))
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    await expect(f("https://api.example.com/data")).rejects.toThrow("Payment state unknown")
+
+    // First proof aborted after server rejection
+    expect(abort).toHaveBeenCalledOnce()
+    // Fresh proof NOT aborted (tx may be on-chain)
+    expect(freshAbort).not.toHaveBeenCalled()
+  })
+
+  it("returns error response when server rejects twice (double rejection)", async () => {
+    const abort1 = vi.fn()
+    const abort2 = vi.fn()
+    let callCount = 0
+    const payGatewayProof = vi.fn().mockImplementation(async () => {
+      callCount++
+      return {
+        proof: {
+          rawtx: "tx-" + callCount,
+          txid: "txid-" + callCount,
+        },
+        abort: callCount === 1 ? abort1 : abort2,
+      }
+    })
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(makePayGateway402())
+      .mockResolvedValueOnce(new Response("Bad Request", { status: 400 }))
+      .mockResolvedValueOnce(new Response("Bad Request Again", { status: 400 }))
+
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+    const res = await f("https://api.example.com/data")
+
+    expect(res.status).toBe(400)
+    expect(abort1).toHaveBeenCalledOnce()
+    expect(abort2).toHaveBeenCalledOnce()
+    expect(payGatewayProof).toHaveBeenCalledTimes(2)
+  })
+
+  it("parsePayGatewayChallenge throwing logs warning and passes through", async () => {
+    // A structurally valid PayGateway challenge with a malformed field that causes a throw
+    const badChallenge = {
+      x402Version: 2,
+      resource: { url: "/test" },
+      accepts: [{
+        scheme: "exact",
+        network: "bsv:mainnet",
+        amount: "100",
+        payTo: "", // empty payTo triggers throw
+        extra: { payToSig: "sig" },
+      }],
+    }
+    const response402 = new Response("Payment Required", {
+      status: 402,
+      headers: {
+        "Payment-Required": btoa(JSON.stringify(badChallenge)),
+      },
+    })
+
+    globalThis.fetch = vi.fn().mockResolvedValue(response402)
+    const payGatewayProof = mockPayGatewayProofConstructor()
+    const f = createX402Fetch({ payGatewayProofConstructor: payGatewayProof })
+
+    const res = await f("https://api.example.com/data")
+    expect(res.status).toBe(402)
+    expect(payGatewayProof).not.toHaveBeenCalled()
   })
 })
