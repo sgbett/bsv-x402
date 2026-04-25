@@ -14,7 +14,7 @@ import type {
   X402Config,
 } from "./types"
 
-import { bytesToBase64, numberArrayToBase64, hexToBytes } from "./bytes"
+import { extractTxData } from "./bytes"
 
 // === Proof construction via BRC-100 wallet (window.CWI) ===
 
@@ -138,15 +138,7 @@ async function defaultConstructProof(challenge: Challenge): Promise<Proof> {
   }
 
   // Convert transaction to base64 BEEF
-  // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
-  let beef: string
-  if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
-    beef = numberArrayToBase64(result.tx)
-  } else if (result.rawTx && typeof result.rawTx === "string" && result.rawTx.length > 0) {
-    beef = bytesToBase64(hexToBytes(result.rawTx))
-  } else {
-    throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
-  }
+  const beef = extractTxData(result).base64
 
   return {
     txid: result.txid,

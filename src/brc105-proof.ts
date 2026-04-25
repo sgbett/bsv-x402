@@ -1,5 +1,6 @@
 import type { Brc105Challenge, Brc105ProofResult, Brc105Wallet } from "./types"
-import { bytesToHex, hexToBytes, bytesToBase64, numberArrayToBase64 } from "./bytes"
+import { bytesToHex, hexToBytes, numberArrayToBase64, extractTxData } from "./bytes"
+import { buildLifecycleCallbacks } from "./proof-helpers"
 
 /** Decode a hex string into a number[] (matching SDK convention). */
 function hexToNumberArray(hex: string): number[] {
@@ -261,47 +262,17 @@ export async function constructBrc105Proof(
   }
 
   // Step 6: Convert transaction to base64
-  // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
-  let transactionBase64: string
-  if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
-    transactionBase64 = numberArrayToBase64(result.tx)
-  } else if (result.rawTx && typeof result.rawTx === "string" && result.rawTx.length > 0) {
-    transactionBase64 = bytesToBase64(hexToBytes(result.rawTx))
-  } else {
-    throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
-  }
+  const txData = extractTxData(result)
 
   const proof = {
     derivationPrefix: challenge.derivationPrefix,
     derivationSuffix,
-    transaction: transactionBase64,
+    transaction: txData.base64,
     clientIdentityKey,
     txid: result.txid,
   }
 
-  const abort = wallet.abortAction
-    ? async () => {
-        try {
-          await wallet.abortAction!({ reference: result.txid })
-        } catch (err) {
-          console.warn('[x402] abortAction failed:', err)
-        }
-      }
-    : undefined
-
-  const broadcast = wallet.createAction
-    ? async () => {
-        try {
-          await wallet.createAction({
-            description: 'Broadcast x402 payment',
-            outputs: [],
-            options: { sendWith: [result.txid] },
-          })
-        } catch (err) {
-          console.warn('[x402] broadcast failed:', err)
-        }
-      }
-    : undefined
+  const { abort, broadcast } = buildLifecycleCallbacks(wallet, result.txid, 'BRC-105')
 
   return { proof, abort, broadcast }
 }
