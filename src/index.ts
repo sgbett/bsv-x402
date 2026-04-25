@@ -10,6 +10,7 @@ export { parseBrc121Challenge } from "./brc121-challenge"
 export { constructBrc121Proof } from "./brc121-proof"
 export { parsePayGatewayChallenge } from "./paygateway-challenge"
 export { constructPayGatewayProof } from "./paygateway-proof"
+export { buildLifecycleCallbacks } from "./proof-helpers"
 
 // Autospend (tier + weapon + health bar)
 export {
