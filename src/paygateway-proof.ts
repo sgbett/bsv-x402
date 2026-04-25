@@ -1,5 +1,6 @@
 import type { PayGatewayChallenge, PayGatewayProof, PayGatewayProofResult, Brc105Wallet } from "./types"
-import { bytesToHex, bytesToBase64 } from "./bytes"
+import { extractTxData } from "./bytes"
+import { buildLifecycleCallbacks } from "./proof-helpers"
 
 // === Main proof constructor ===
 
@@ -51,53 +52,16 @@ export async function constructPayGatewayProof(
   }
 
   // Step 2: Extract raw tx hex and optional BEEF base64
-  // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
-  let rawtx: string
-  let beef: string | undefined
-  if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
-    const txBytes = new Uint8Array(result.tx)
-    rawtx = bytesToHex(txBytes)
-    beef = bytesToBase64(txBytes)
-  } else if (result.rawTx && typeof result.rawTx === "string" && result.rawTx.length > 0) {
-    rawtx = result.rawTx
-    // No BEEF available from rawTx-only wallets
-  } else {
-    const msg = "[x402] PayGateway proof: wallet returned no transaction data (neither tx nor rawTx)"
-    console.error(msg)
-    throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
-  }
+  const txData = extractTxData(result)
 
   // Step 3: Build proof object
-  const proof: PayGatewayProof = { rawtx, txid: result.txid }
-  if (beef) {
-    proof.beef = beef
+  const proof: PayGatewayProof = { rawtx: txData.hex, txid: result.txid }
+  if (txData.source === 'tx') {
+    proof.beef = txData.base64
   }
 
-  // Step 4: Build abort callback
-  const abort = wallet.abortAction
-    ? async () => {
-        try {
-          await wallet.abortAction!({ reference: result.txid })
-        } catch (err) {
-          console.warn('[x402] PayGateway abortAction failed:', err)
-        }
-      }
-    : undefined
-
-  // Step 5: Build broadcast callback
-  const broadcast = wallet.createAction
-    ? async () => {
-        try {
-          await wallet.createAction({
-            description: 'Broadcast x402 payment',
-            outputs: [],
-            options: { sendWith: [result.txid] },
-          })
-        } catch (err) {
-          console.warn('[x402] PayGateway broadcast failed:', err)
-        }
-      }
-    : undefined
+  // Step 4: Build lifecycle callbacks
+  const { abort, broadcast } = buildLifecycleCallbacks(wallet, result.txid, 'PayGateway')
 
   return { proof, abort, broadcast }
 }

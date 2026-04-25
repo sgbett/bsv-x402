@@ -6,7 +6,9 @@ import { BuiltInWalletBackend } from './builtin-wallet-backend'
 import * as wallet from './wallet-controller'
 import * as x402 from './x402-controller'
 import { resolveApproval, handleWindowClosed } from './pending-approvals'
-import { payeeAddressToLockingScript, verifyBase58Checksum } from '../../src/x402-fetch'
+import { payeeAddressToLockingScript, verifyBase58Checksum, BASE58_ALPHABET } from '../../src/x402-fetch'
+import { hexToBytes } from '../../src/bytes'
+import { hash160 } from '../../src/brc105-proof'
 import { verifyUtxos } from './verify-utxos'
 
 // Helper: fetch current wallet balance (for autospend tier clamping)
@@ -23,23 +25,6 @@ async function getWalletBalance(): Promise<number> {
 // ---------------------------------------------------------------------------
 // Pubkey → P2PKH address (for popup display)
 // ---------------------------------------------------------------------------
-
-const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
-
-function hexToBytes(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
-  }
-  return bytes
-}
-
-async function hash160(data: Uint8Array): Promise<Uint8Array> {
-  // Import ripemd160 inline to avoid circular deps — same impl as brc105-proof.ts
-  const { ripemd160 } = await import('../../src/brc105-proof')
-  const sha256 = new Uint8Array(await crypto.subtle.digest('SHA-256', data as ArrayBufferView<ArrayBuffer>))
-  return ripemd160(sha256)
-}
 
 async function pubkeyToAddress(pubkeyHex: string): Promise<string> {
   const pubkeyBytes = hexToBytes(pubkeyHex)

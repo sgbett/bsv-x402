@@ -1,6 +1,7 @@
 import type { Brc121Challenge, Brc121ProofResult, Brc105Wallet } from "./types"
 import { pubkeyToP2PKHLockingScript } from "./brc105-proof"
-import { bytesToBase64, numberArrayToBase64, hexToBytes } from "./bytes"
+import { extractTxData } from "./bytes"
+import { buildLifecycleCallbacks } from "./proof-helpers"
 
 // === Main proof constructor ===
 
@@ -88,18 +89,10 @@ export async function constructBrc121Proof(
   }
 
   // Step 7: Convert transaction to base64
-  // SDK wallets return `tx: number[]`; CWI wallets return `rawTx: string` (hex)
-  let transactionBase64: string
-  if (result.tx && Array.isArray(result.tx) && result.tx.length > 0) {
-    transactionBase64 = numberArrayToBase64(result.tx)
-  } else if (result.rawTx && typeof result.rawTx === "string" && result.rawTx.length > 0) {
-    transactionBase64 = bytesToBase64(hexToBytes(result.rawTx))
-  } else {
-    throw new Error("Wallet returned no transaction data (neither tx nor rawTx)")
-  }
+  const txData = extractTxData(result)
 
   const proof = {
-    beef: transactionBase64,
+    beef: txData.base64,
     senderIdentityKey: clientIdentityKey,
     nonce,
     time,
@@ -107,29 +100,7 @@ export async function constructBrc121Proof(
     txid: result.txid,
   }
 
-  const abort = wallet.abortAction
-    ? async () => {
-        try {
-          await wallet.abortAction!({ reference: result.txid })
-        } catch (err) {
-          console.warn('[x402] abortAction failed:', err)
-        }
-      }
-    : undefined
-
-  const broadcast = wallet.createAction
-    ? async () => {
-        try {
-          await wallet.createAction({
-            description: 'Broadcast x402 payment',
-            outputs: [],
-            options: { sendWith: [result.txid] },
-          })
-        } catch (err) {
-          console.warn('[x402] broadcast failed:', err)
-        }
-      }
-    : undefined
+  const { abort, broadcast } = buildLifecycleCallbacks(wallet, result.txid, 'BRC-121')
 
   return { proof, abort, broadcast }
 }
