@@ -18,7 +18,7 @@ import { bytesToBase64, numberArrayToBase64, hexToBytes } from "./bytes"
 
 // === Proof construction via BRC-100 wallet (window.CWI) ===
 
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+export const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 /**
  * Decode a Base58 string to raw bytes (no checksum verification).
