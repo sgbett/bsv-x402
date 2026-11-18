@@ -21,6 +21,12 @@ npm run build:safari    # Build Safari only
 npm run build:all       # Build library + all plugins
 ```
 
+## Git
+
+Git tier: collaborative
+
+Git rules: `.claude/rules/git-workflow.md`, vendored from sgbett/dotfiles-claude; nothing in this repository differs from them.
+
 ## Specifications
 
 This project implements published protocol specifications (BRC-105, BRC-29, BRC-100, etc.). When writing or modifying code that implements a spec, consult the spec directly (via `bsv-protocol-docs` MCP) and verify conformance — including optional features unless there is a documented reason to omit them. Tests should be anchored to spec requirements, not just implementation behaviour.
