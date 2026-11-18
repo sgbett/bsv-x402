@@ -51,6 +51,7 @@ npm run build:all    # Build library + all browser extensions
 - [DESIGN.md](DESIGN.md) — architecture and protocol details
 - [ECONOMICS.md](ECONOMICS.md) — economics of ARC broadcasting for micropayments
 - [BEEF-SIGNALLING.md](BEEF-SIGNALLING.md) — how BEEF type communicates broadcast intent
+- [GIT-WORKFLOW-SETUP.md](GIT-WORKFLOW-SETUP.md) — a collaborator's git setup and the admin procedure for the branch ruleset
 - [CHANGELOG.md](CHANGELOG.md) — version history
 
 ## Status
